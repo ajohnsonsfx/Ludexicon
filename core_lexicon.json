@@ -1,0 +1,42 @@
+{
+    "el.action.impact": {
+        "name": "Impact",
+        "status": "approved",
+        "wildcard_id": "wc.action"
+    },
+    "el.action.melee": {
+        "name": "Melee",
+        "status": "approved",
+        "wildcard_id": "wc.action"
+    },
+    "el.action.ranged": {
+        "name": "Ranged",
+        "status": "approved",
+        "wildcard_id": "wc.action"
+    },
+    "el.action.walk": {
+        "name": "Walk",
+        "status": "approved",
+        "wildcard_id": "wc.action"
+    },
+    "el.class.mob": {
+        "name": "Mob",
+        "status": "approved",
+        "triggers": [
+            {
+                "delimiter": "_",
+                "id": "wc.mob_id"
+            }
+        ],
+        "wildcard_id": "wc.entity_class"
+    },
+    "wc.action": {
+        "name": "Action"
+    },
+    "wc.entity_class": {
+        "name": "Entity Class"
+    },
+    "wc.mob_id": {
+        "name": "Mob ID"
+    }
+}

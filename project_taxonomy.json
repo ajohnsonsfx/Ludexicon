@@ -1,0 +1,29 @@
+{
+    "el.mob.firefiend": {
+        "name": "FireFiend",
+        "status": "approved",
+        "wildcard_id": "wc.mob_id"
+    },
+    "el.mob.saltdevil": {
+        "name": "SaltDevil",
+        "status": "approved",
+        "wildcard_id": "wc.mob_id"
+    },
+    "pat.combat.melee": {
+        "filename_structure": [
+            {
+                "id": "wc.entity_class",
+                "type": "wildcard"
+            },
+            {
+                "type": "literal",
+                "value": "_"
+            },
+            {
+                "id": "wc.action",
+                "type": "wildcard"
+            }
+        ],
+        "name": "Entity Attack"
+    }
+}
