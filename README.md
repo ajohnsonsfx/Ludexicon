@@ -24,14 +24,22 @@ The application relies on several core components to generate permutations of as
 
 The project has been refactored into distinct files to properly separate application logic, user interface, and storage concerns:
 
-- `logic.py`: The underlying data engine, including the `TaxonomyManager` and core data models (`Element`, `Wildcard`, `Pattern`, `Trigger`, etc.).
-- `ui_main.py`: The PyQt6 graphical user interface consisting of specific dock widgets and interactive layout generation.
-- `test_ludexicon.py`: Unit tests validating the file structure components and the deterministic logic outputs.
+- `src/logic.py`: The underlying data engine, including the `TaxonomyManager` and core data models (`Element`, `Wildcard`, `Pattern`, `Trigger`, etc.).
+- `src/ui_main.py`: The PyQt6 graphical user interface consisting of specific dock widgets and interactive layout generation.
+- `src/test_ludexicon.py`: Unit tests validating the file structure components and the deterministic logic outputs.
 - `data/`: A dedicated folder containing the project’s JSON taxonomies:
   - `dictionary_core.json`: Core master application taxonomy.
   - `dictionary_project.json`: Project-specific taxonomy and customizations.
+- `launch.bat`: A convenient Windows batch script to bootstrap the virtual environment and run the application.
 
 ## Installation & Running
+
+You can launch the application effortlessly on Windows using the included bootstrapper:
+
+1. Double click `launch.bat` in the project root.
+   - *This will automatically create a `.venv` virtual environment if one does not exist, install all dependencies from `requirements.txt`, and launch the PyQt6 interface without leaving a trailing command prompt window open.*
+
+### Manual Installation (Non-Windows or Advanced)
 
 Ensure you have Python 3.10+ installed.
 
@@ -40,7 +48,7 @@ Ensure you have Python 3.10+ installed.
    pip install -r requirements.txt
    ```
 
-2. Run the application:
+2. Run the application from the `src` directory:
    ```bash
-   python ui_main.py
+   python src/ui_main.py
    ```
