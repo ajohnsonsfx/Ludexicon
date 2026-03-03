@@ -1,5 +1,10 @@
 import sys
 import os
+
+# Redirect standard output and error to log file
+log_file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'ludexicon.log')
+sys.stdout = open(log_file_path, "w")
+sys.stderr = sys.stdout
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QDockWidget, QWidget, QVBoxLayout, QHBoxLayout,
     QTreeView, QListWidget, QScrollArea, QPushButton, QCheckBox,
@@ -346,8 +351,6 @@ class MainWindow(QMainWindow):
         self.init_ui()
 
     def init_ui(self):
-        self.create_menu_bar()
-        
         # Center Pane: Unified Builder
         self.central_widget = QWidget()
         self.setCentralWidget(self.central_widget)
@@ -416,6 +419,8 @@ class MainWindow(QMainWindow):
         
         self.right_dock.setWidget(self.right_widget)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.right_dock)
+        
+        self.create_menu_bar()
         
         self.current_matrix = []
 

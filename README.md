@@ -38,7 +38,8 @@ The project has been refactored into distinct files to properly separate applica
 You can launch the application effortlessly on Windows using the included bootstrapper:
 
 1. Double click `launch.bat` in the project root.
-   - *This will automatically create a `.venv` virtual environment if one does not exist, install all dependencies from `requirements.txt`, and launch the PyQt6 interface without leaving a trailing command prompt window open.*
+   - *This will automatically create a `.venv` virtual environment if one does not exist, install all dependencies from `requirements.txt`, and launch the PyQt6 interface.*
+   - *The application now launches silently in the background (closing the initial command prompt). Any standard console output or error messages will be automatically logged to `ludexicon.log` in the root directory.*
 
 ### Manual Installation (Non-Windows or Advanced)
 
