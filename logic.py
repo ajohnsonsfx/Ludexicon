@@ -85,7 +85,7 @@ class Pattern:
         }
 
 class TaxonomyManager:
-    def __init__(self, core_path: str = "core_lexicon.json", project_path: str = "project_taxonomy.json"):
+    def __init__(self, core_path: str = "data/dictionary_core.json", project_path: str = "data/dictionary_project.json"):
         self.core_path = core_path
         self.project_path = project_path
         

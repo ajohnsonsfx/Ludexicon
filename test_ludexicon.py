@@ -1,8 +1,8 @@
-from data_models import TaxonomyManager, Wildcard, Element, Pattern, PatternComponent, Trigger
+from logic import TaxonomyManager, Wildcard, Element, Pattern, PatternComponent, Trigger
 
 def run_tests():
     # Instantiate manager with file paths
-    manager = TaxonomyManager("core_lexicon.json", "project_taxonomy.json")
+    manager = TaxonomyManager("data/dictionary_core.json", "data/dictionary_project.json")
     
     # 1. Setup Core Taxonomy
     manager.add_item("core", Wildcard("wc.entity_class", "Entity Class"))
@@ -59,11 +59,11 @@ def run_tests():
     # 3. Save to JSON deterministically
     print("Saving Core and Project Taxonomies...")
     manager.save()
-    print("Files 'core_lexicon.json' and 'project_taxonomy.json' saved successfully.")
+    print("Files 'dictionary_core.json' and 'dictionary_project.json' saved successfully.")
     print("-" * 40)
     
     # Reload from JSON to verify saving/parsing works
-    new_manager = TaxonomyManager("core_lexicon.json", "project_taxonomy.json")
+    new_manager = TaxonomyManager("data/dictionary_core.json", "data/dictionary_project.json")
     new_manager.load()
     
     # 4. Matrix Generation

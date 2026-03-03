@@ -1,9 +1,4 @@
 {
-    "el.mob.firefiend": {
-        "name": "FireFiend",
-        "status": "approved",
-        "wildcard_id": "wc.mob_id"
-    },
     "el.mob.saltdevil": {
         "name": "SaltDevil",
         "status": "approved",
