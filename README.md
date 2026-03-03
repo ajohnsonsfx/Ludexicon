@@ -15,6 +15,7 @@ The application relies on several core components to generate permutations of as
 
 ## Features
 
+- **Top Menu Navigation**: Access standard features such as application exit (File), toggling dock visibility (Window), and viewing tool information (Help).
 - **Automated Matrix Generation**: Select variables from different Sound Types and automatically generate every valid permutation of file names.
 - **Lexicon Browser**: Explore both Core and Project-specific taxonomy data through an intuitive tree list.
 - **Visual Builder**: Interactively slot literal strings and variables (Sound Types) to build out new Name Sets on the fly.

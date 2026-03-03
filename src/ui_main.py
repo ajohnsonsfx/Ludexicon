@@ -4,7 +4,7 @@ from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QDockWidget, QWidget, QVBoxLayout, QHBoxLayout,
     QTreeView, QListWidget, QScrollArea, QPushButton, QCheckBox,
     QLineEdit, QLabel, QSplitter, QComboBox, QFrame, QListWidgetItem,
-    QToolButton, QSizePolicy, QMenu
+    QToolButton, QSizePolicy, QMenu, QMessageBox
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QEvent
 from PyQt6.QtGui import QStandardItemModel, QStandardItem, QAction
@@ -346,6 +346,8 @@ class MainWindow(QMainWindow):
         self.init_ui()
 
     def init_ui(self):
+        self.create_menu_bar()
+        
         # Center Pane: Unified Builder
         self.central_widget = QWidget()
         self.setCentralWidget(self.central_widget)
@@ -416,6 +418,42 @@ class MainWindow(QMainWindow):
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.right_dock)
         
         self.current_matrix = []
+
+    def create_menu_bar(self):
+        menubar = self.menuBar()
+        
+        # File Menu
+        file_menu = menubar.addMenu("&File")
+        
+        exit_action = QAction("&Exit", self)
+        exit_action.setShortcut("Ctrl+Q")
+        exit_action.triggered.connect(self.close)
+        file_menu.addAction(exit_action)
+        
+        # Edit Menu
+        edit_menu = menubar.addMenu("&Edit")
+        # Placeholder for future edit actions
+        
+        # Window Menu
+        window_menu = menubar.addMenu("&Window")
+        
+        # Toggle docks visibility
+        window_menu.addAction(self.left_dock.toggleViewAction())
+        window_menu.addAction(self.right_dock.toggleViewAction())
+        
+        # Help Menu
+        help_menu = menubar.addMenu("&Help")
+        
+        about_action = QAction("&About", self)
+        about_action.triggered.connect(self.show_about)
+        help_menu.addAction(about_action)
+
+    def show_about(self):
+        QMessageBox.about(self, "About Ludexicon", 
+            "<b>Ludexicon</b><br><br>"
+            "Game Asset Taxonomy Engine.<br>"
+            "A tool for standardizing naming conventions.<br><br>"
+            "Version 0.1")
 
     def populate_lexicon_tree(self):
         root = self.tree_model.invisibleRootItem()
