@@ -9,7 +9,7 @@ from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QDockWidget, QWidget, QVBoxLayout, QHBoxLayout,
     QTreeView, QListWidget, QScrollArea, QPushButton, QCheckBox,
     QLineEdit, QLabel, QSplitter, QComboBox, QFrame, QListWidgetItem,
-    QToolButton, QSizePolicy, QMenu, QMessageBox
+    QToolButton, QSizePolicy, QMenu, QMessageBox, QTabWidget
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QEvent
 from PyQt6.QtGui import QStandardItemModel, QStandardItem, QAction
@@ -347,6 +347,8 @@ class MainWindow(QMainWindow):
         
         # Core data structures for matrix generation tracking
         self.groups = [] 
+        self.browser_count = 1
+        self.browsers = []
         
         self.init_ui()
 
@@ -376,29 +378,17 @@ class MainWindow(QMainWindow):
         
         self.central_layout.addWidget(self.group_scroll)
 
-        # Left Pane: Lexicon Browser
-        self.left_dock = QDockWidget("Lexicon Browser", self)
-        self.left_dock.setAllowedAreas(Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea)
-        self.left_widget = QWidget()
-        self.left_layout = QVBoxLayout(self.left_widget)
-        
-        self.search_bar = QLineEdit()
-        self.search_bar.setPlaceholderText("Search Taxonomy...")
-        self.left_layout.addWidget(self.search_bar)
-        
-        self.tree_view = QTreeView()
-        self.tree_model = QStandardItemModel()
-        self.tree_model.setHorizontalHeaderLabels(["Lexicon Data"])
-        self.tree_view.setModel(self.tree_model)
-        self.populate_lexicon_tree()
-        self.left_layout.addWidget(self.tree_view)
-        
-        self.left_dock.setWidget(self.left_widget)
+        # Dock settings
+        self.setDockNestingEnabled(True)
+        self.setTabPosition(Qt.DockWidgetArea.AllDockWidgetAreas, QTabWidget.TabPosition.North)
+
+        # Left Pane: Browser
+        self.left_dock = self.create_browser_dock("Browser")
         self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.left_dock)
 
-        # Right Pane: Output Log
-        self.right_dock = QDockWidget("Output Log", self)
-        self.right_dock.setAllowedAreas(Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea)
+        # Right Pane: Output
+        self.right_dock = QDockWidget("Output", self)
+        self.right_dock.setAllowedAreas(Qt.DockWidgetArea.AllDockWidgetAreas)
         self.right_widget = QWidget()
         self.right_layout = QVBoxLayout(self.right_widget)
         
@@ -442,6 +432,12 @@ class MainWindow(QMainWindow):
         # Window Menu
         window_menu = menubar.addMenu("&Window")
         
+        # Spawn New Browser
+        new_browser_action = QAction("&New Browser", self)
+        new_browser_action.triggered.connect(self.spawn_new_browser)
+        window_menu.addAction(new_browser_action)
+        window_menu.addSeparator()
+        
         # Toggle docks visibility
         window_menu.addAction(self.left_dock.toggleViewAction())
         window_menu.addAction(self.right_dock.toggleViewAction())
@@ -453,15 +449,62 @@ class MainWindow(QMainWindow):
         about_action.triggered.connect(self.show_about)
         help_menu.addAction(about_action)
 
+    def create_browser_dock(self, title: str) -> QDockWidget:
+        dock = QDockWidget(title, self)
+        dock.setAllowedAreas(Qt.DockWidgetArea.AllDockWidgetAreas)
+        
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        
+        search_bar = QLineEdit()
+        search_bar.setPlaceholderText("Search Taxonomy...")
+        layout.addWidget(search_bar)
+        
+        tree_view = QTreeView()
+        tree_model = QStandardItemModel()
+        tree_model.setHorizontalHeaderLabels(["Lexicon Data"])
+        tree_view.setModel(tree_model)
+        
+        layout.addWidget(tree_view)
+        
+        dock.setWidget(widget)
+        
+        # We store references so they don't get garbage collected and can expand
+        # But populate_lexicon_tree doesn't dynamically update right now natively
+        dock.tree_view = tree_view
+        dock.tree_model = tree_model
+        dock.search_bar = search_bar
+        
+        self.populate_lexicon_tree(tree_model, tree_view)
+        
+        self.browsers.append(dock)
+        return dock
+
+    def spawn_new_browser(self):
+        self.browser_count += 1
+        new_dock = self.create_browser_dock(f"Browser {self.browser_count}")
+        # Add to the same dock area and tabify it with the first one 
+        # so they stack properly instead of just squeezing.
+        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, new_dock)
+        if self.browsers: # Try to tabify with the first browser
+            self.tabifyDockWidget(self.browsers[0], new_dock)
+            new_dock.show()
+
     def show_about(self):
         QMessageBox.about(self, "About Ludexicon", 
             "<b>Ludexicon</b><br><br>"
             "Game Asset Taxonomy Engine.<br>"
             "A tool for standardizing naming conventions.<br><br>"
+            "Created by: <a href='https://github.com/ajohnsonsfx'>Alex Johnson</a><br><br>"
             "Version 0.1")
 
-    def populate_lexicon_tree(self):
-        root = self.tree_model.invisibleRootItem()
+    def populate_lexicon_tree(self, tree_model=None, tree_view=None):
+        if tree_model is None:
+            tree_model = getattr(self, 'tree_model', None)
+        if tree_view is None:
+            tree_view = getattr(self, 'tree_view', None)
+
+        root = tree_model.invisibleRootItem()
         
         # Core
         core_node = QStandardItem("Core Lexicon")
@@ -485,7 +528,8 @@ class MainWindow(QMainWindow):
             
         root.appendRow(core_node)
         root.appendRow(proj_node)
-        self.tree_view.expandAll()
+        if tree_view:
+            tree_view.expandAll()
 
     def add_dummy_group(self):
         name = f"Asset Group {len(self.groups) + 1}"
