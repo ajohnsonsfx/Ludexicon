@@ -85,7 +85,15 @@ class Pattern:
         }
 
 class TaxonomyManager:
-    def __init__(self, core_path: str = "data/dictionary_core.json", project_path: str = "data/dictionary_project.json"):
+    def __init__(self, core_path: str = None, project_path: str = None):
+        if core_path is None or project_path is None:
+            root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            data_dir = os.path.join(root_dir, "data")
+            if core_path is None:
+                core_path = os.path.join(data_dir, "dictionary_core.json")
+            if project_path is None:
+                project_path = os.path.join(data_dir, "dictionary_project.json")
+                
         self.core_path = core_path
         self.project_path = project_path
         

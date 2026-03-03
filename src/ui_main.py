@@ -531,7 +531,7 @@ def main():
         QMenu::item:selected { background-color: #4b6eaf; }
     """)
     
-    manager = TaxonomyManager("data/dictionary_core.json", "data/dictionary_project.json")
+    manager = TaxonomyManager()
     setup_dummy_data(manager) # populate basic stuff for UX pass
     manager.load()
     

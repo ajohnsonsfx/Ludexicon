@@ -2,7 +2,7 @@ from logic import TaxonomyManager, Wildcard, Element, Pattern, PatternComponent,
 
 def run_tests():
     # Instantiate manager with file paths
-    manager = TaxonomyManager("data/dictionary_core.json", "data/dictionary_project.json")
+    manager = TaxonomyManager()
     
     # 1. Setup Core Taxonomy
     manager.add_item("core", Wildcard("wc.entity_class", "Entity Class"))
@@ -63,7 +63,7 @@ def run_tests():
     print("-" * 40)
     
     # Reload from JSON to verify saving/parsing works
-    new_manager = TaxonomyManager("data/dictionary_core.json", "data/dictionary_project.json")
+    new_manager = TaxonomyManager()
     new_manager.load()
     
     # 4. Matrix Generation
