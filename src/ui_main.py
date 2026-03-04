@@ -9,12 +9,12 @@ from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QDockWidget, QWidget, QVBoxLayout, QHBoxLayout,
     QTreeView, QListWidget, QScrollArea, QPushButton, QCheckBox,
     QLineEdit, QLabel, QSplitter, QComboBox, QFrame, QListWidgetItem,
-    QToolButton, QSizePolicy, QMenu, QMessageBox, QTabWidget
+    QToolButton, QSizePolicy, QMenu, QMessageBox, QTabWidget, QInputDialog
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QEvent
 from PyQt6.QtGui import QStandardItemModel, QStandardItem, QAction
 
-from logic import TaxonomyManager, Element, Pattern, Wildcard, PatternComponent, Trigger
+from logic import TaxonomyManager, Value, NameSet, Wildcard, NameSetComponent, Trigger
 
 
 class MultiSelectComboBox(QPushButton):
@@ -30,20 +30,20 @@ class MultiSelectComboBox(QPushButton):
         self.menu = QMenu(self)
         self.setMenu(self.menu)
         
-        self._action_element_map = {}
+        self._action_value_map = {}
         
         self.menu.triggered.connect(self._on_action_triggered)
         self.setStyleSheet("text-align: left;")
 
-    def add_element(self, element: Element):
-        action = QAction(element.name, self.menu)
+    def add_value(self, value: Value):
+        action = QAction(value.name, self.menu)
         action.setCheckable(True)
         self.menu.addAction(action)
-        self._action_element_map[action] = element
+        self._action_value_map[action] = value
 
     def clear(self):
         self.menu.clear()
-        self._action_element_map.clear()
+        self._action_value_map.clear()
         self.setText(self.title_base)
 
     def _on_action_triggered(self, action: QAction):
@@ -52,7 +52,7 @@ class MultiSelectComboBox(QPushButton):
         self.selectionChanged.emit()
 
     def update_title(self):
-        selected = self.get_selected_elements()
+        selected = self.get_selected_values()
         if not selected:
             self.setText(self.title_base)
         elif len(selected) == 1:
@@ -60,8 +60,8 @@ class MultiSelectComboBox(QPushButton):
         else:
             self.setText(f"{self.title_base}: [ {len(selected)} selected ]")
 
-    def get_selected_elements(self):
-        return [self._action_element_map[act] for act, el in self._action_element_map.items() if act.isChecked()]
+    def get_selected_values(self):
+        return [self._action_value_map[act] for act, val in self._action_value_map.items() if act.isChecked()]
 
 
 class CollapsibleBox(QWidget):
@@ -105,19 +105,19 @@ class CollapsibleBox(QWidget):
             self.content_area.setMaximumHeight(0)
 
 
-class PatternWidget(QFrame):
+class NameSetWidget(QFrame):
     sequenceChanged = pyqtSignal()
     
-    def __init__(self, pattern: Pattern, tax_manager: TaxonomyManager, parent=None):
+    def __init__(self, nameset: NameSet, tax_manager: TaxonomyManager, parent=None):
         super().__init__(parent)
-        self.base_pattern = pattern
+        self.base_nameset = nameset
         self.tax_manager = tax_manager
         
         self.setFrameShape(QFrame.Shape.StyledPanel)
-        self.setStyleSheet("PatternWidget { background-color: #2b2b2b; border: 1px solid #444; border-radius: 3px; }")
+        self.setStyleSheet("NameSetWidget { background-color: #2b2b2b; border: 1px solid #444; border-radius: 3px; }")
         
         self.slots = []
-        for c in pattern.filename_structure:
+        for c in nameset.nameset_structure:
             self.slots.append({'type': c.type, 'id': c.id, 'value': c.value})
             
         self.slots_layout = QHBoxLayout()
@@ -136,7 +136,7 @@ class PatternWidget(QFrame):
         main_layout.setContentsMargins(8, 8, 8, 8)
         
         header_layout = QHBoxLayout()
-        header_layout.addWidget(QLabel(f"<b>Pattern component: {pattern.name}</b>"))
+        header_layout.addWidget(QLabel(f"<b>NameSet component: {nameset.name}</b>"))
         
         main_layout.addLayout(header_layout)
         main_layout.addWidget(self.slots_container)
@@ -229,41 +229,41 @@ class GroupWidget(QFrame):
         
         self.header_layout = QHBoxLayout()
         self.header_label = QLabel(f"<h3 style='margin:0;'>Group: {name}</h3>")
-        self.add_pattern_btn = QPushButton("+ Add Pattern")
-        self.add_pattern_btn.clicked.connect(self.on_add_pattern)
+        self.add_nameset_btn = QPushButton("+ Add NameSet")
+        self.add_nameset_btn.clicked.connect(self.on_add_nameset)
         
         self.header_layout.addWidget(self.header_label)
         self.header_layout.addStretch()
-        self.header_layout.addWidget(self.add_pattern_btn)
+        self.header_layout.addWidget(self.add_nameset_btn)
         self.main_layout.addLayout(self.header_layout)
         
-        self.collapsible_box = CollapsibleBox(title="Variables (Expand to lock/select)")
+        self.collapsible_box = CollapsibleBox(title="Wildcards (Expand to lock/select)")
         self.main_layout.addWidget(self.collapsible_box)
         
-        self.patterns_layout = QVBoxLayout()
-        self.patterns_layout.setSpacing(10)
-        self.main_layout.addLayout(self.patterns_layout)
+        self.namesets_layout = QVBoxLayout()
+        self.namesets_layout.setSpacing(10)
+        self.main_layout.addLayout(self.namesets_layout)
         
-        self.patterns = []
+        self.namesets = []
         self.wildcard_combos = {}
         self.base_wildcards = set()
 
-    def on_add_pattern(self):
-        pat = self.tax_manager.get_pattern("pat.combat.melee")
-        if pat:
-            self.add_pattern(pat)
+    def on_add_nameset(self):
+        ns = self.tax_manager.get_nameset("ns.combat.melee")
+        if ns:
+            self.add_nameset(ns)
 
-    def add_pattern(self, pattern):
-        pw = PatternWidget(pattern, self.tax_manager, self)
-        pw.sequenceChanged.connect(self.update_base_wildcards)
-        self.patterns_layout.addWidget(pw)
-        self.patterns.append(pw)
+    def add_nameset(self, nameset):
+        nw = NameSetWidget(nameset, self.tax_manager, self)
+        nw.sequenceChanged.connect(self.update_base_wildcards)
+        self.namesets_layout.addWidget(nw)
+        self.namesets.append(nw)
         self.update_base_wildcards()
 
     def update_base_wildcards(self):
         new_base = set()
-        for pw in self.patterns:
-            for slot in pw.slots:
+        for nw in self.namesets:
+            for slot in nw.slots:
                 if slot['type'] == 'wildcard' and slot['id']:
                     new_base.add(slot['id'])
         self.base_wildcards = new_base
@@ -278,9 +278,9 @@ class GroupWidget(QFrame):
         while i < len(queue):
             curr_id = queue[i]
             if curr_id in self.wildcard_combos:
-                selected = self.wildcard_combos[curr_id].get_selected_elements()
-                for el in selected:
-                    for t in el.triggers:
+                selected = self.wildcard_combos[curr_id].get_selected_values()
+                for v in selected:
+                    for t in v.triggers:
                         if t.id not in required and t.id not in triggered:
                             triggered.add(t.id)
                             queue.append(t.id)
@@ -308,10 +308,10 @@ class GroupWidget(QFrame):
         name = wildcard.name if wildcard else wildcard_id
         combo = MultiSelectComboBox(f"[{name}]")
         
-        all_elements = list(self.tax_manager.core_registry["elements"].values()) + list(self.tax_manager.project_registry["elements"].values())
-        for el in all_elements:
-            if el.wildcard_id == wildcard_id:
-                combo.add_element(el)
+        all_values = list(self.tax_manager.core_registry["values"].values()) + list(self.tax_manager.project_registry["values"].values())
+        for val in all_values:
+            if val.wildcard_id == wildcard_id:
+                combo.add_value(val)
                 
         combo.selectionChanged.connect(self.on_selection_changed)
         self.wildcard_combos[wildcard_id] = combo
@@ -322,75 +322,86 @@ class GroupWidget(QFrame):
         self.sync_combos()
 
     def get_selections(self):
-        return {w_id: combo.get_selected_elements() for w_id, combo in self.wildcard_combos.items()}
+        return {w_id: combo.get_selected_values() for w_id, combo in self.wildcard_combos.items()}
 
     def regenerate_all_matrices(self):
         selections = self.get_selections()
-        for pw in self.patterns:
-            pw.generate_and_preview(selections)
+        for nw in self.namesets:
+            nw.generate_and_preview(selections)
         self.globalMatrixUpdated.emit()
 
     def get_all_global_matrices(self):
         global_matrix = []
-        for pw in self.patterns:
-            global_matrix.extend(pw.last_generated_names)
+        for nw in self.namesets:
+            global_matrix.extend(nw.last_generated_names)
         return global_matrix
 
 
+class DockTitleTab(QWidget):
+    def __init__(self, title, parent=None):
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setStyleSheet("DockTitleTab { background-color: #1e1e1e; border-bottom: 1px solid #444; }")
+        
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(4, 0, 0, 0)
+        layout.setSpacing(0)
+        
+        self.label = QLabel(title)
+        self.label.setStyleSheet("""
+            QLabel {
+                background-color: #2b2b2b;
+                color: #e0e0e0;
+                padding: 4px 12px;
+                border: 1px solid #444;
+                border-bottom: none;
+                border-top-left-radius: 4px;
+                border-top-right-radius: 4px;
+                margin-top: 2px;
+            }
+        """)
+        
+        layout.addWidget(self.label)
+        layout.addStretch()
 
-class MainWindow(QMainWindow):
-    def __init__(self, tax_manager: TaxonomyManager):
-        super().__init__()
+
+class BuilderWidget(QWidget):
+    def __init__(self, tax_manager: TaxonomyManager, parent=None):
+        super().__init__(parent)
         self.tax_manager = tax_manager
-        self.setWindowTitle("Ludexicon - Game Asset Taxonomy Engine")
-        self.resize(1200, 800)
-        
-        # Core data structures for matrix generation tracking
-        self.groups = [] 
-        self.browser_count = 1
-        self.browsers = []
-        
-        self.init_ui()
+        self.groups = []
+        self.current_matrix = []
 
-    def init_ui(self):
-        # Center Pane: Unified Builder
-        self.central_widget = QWidget()
-        self.setCentralWidget(self.central_widget)
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+
+        self.splitter = QSplitter(Qt.Orientation.Horizontal)
+        lay.addWidget(self.splitter)
+
+        # Left side: Builder
+        self.builder_widget = QWidget()
+        self.builder_layout = QVBoxLayout(self.builder_widget)
+        self.builder_layout.setContentsMargins(10, 10, 10, 10)
         
-        self.central_layout = QVBoxLayout(self.central_widget)
-        self.central_layout.setContentsMargins(10, 10, 10, 10)
-        
-        # Toolbar / Add Group
         self.toolbar_layout = QHBoxLayout()
         self.add_group_btn = QPushButton("+ Add Group")
         self.add_group_btn.clicked.connect(self.add_dummy_group)
         self.toolbar_layout.addWidget(self.add_group_btn)
         self.toolbar_layout.addStretch()
-        self.central_layout.addLayout(self.toolbar_layout)
+        self.builder_layout.addLayout(self.toolbar_layout)
         
-        # Scroll area for groups
         self.group_scroll = QScrollArea()
         self.group_scroll.setWidgetResizable(True)
         self.group_container = QWidget()
         self.group_layout = QVBoxLayout(self.group_container)
         self.group_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         self.group_scroll.setWidget(self.group_container)
-        
-        self.central_layout.addWidget(self.group_scroll)
+        self.builder_layout.addWidget(self.group_scroll)
 
-        # Dock settings
-        self.setDockNestingEnabled(True)
-        self.setTabPosition(Qt.DockWidgetArea.AllDockWidgetAreas, QTabWidget.TabPosition.North)
-
-        # Left Pane: Browser
-        self.left_dock = self.create_browser_dock("Browser")
-        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.left_dock)
-
-        # Right Pane: Output
-        self.right_dock = QDockWidget("Output", self)
-        self.right_dock.setAllowedAreas(Qt.DockWidgetArea.AllDockWidgetAreas)
-        self.right_widget = QWidget()
-        self.right_layout = QVBoxLayout(self.right_widget)
+        # Right side: Output
+        self.output_widget = QWidget()
+        self.right_layout = QVBoxLayout(self.output_widget)
+        self.right_layout.setContentsMargins(10, 10, 10, 10)
         
         self.ext_checkbox = QCheckBox("Append .wav extension")
         self.ext_checkbox.stateChanged.connect(self.update_output_log)
@@ -406,19 +417,112 @@ class MainWindow(QMainWindow):
         self.btn_layout.addWidget(self.copy_btn)
         self.btn_layout.addWidget(self.export_btn)
         self.right_layout.addLayout(self.btn_layout)
+
+        self.splitter.addWidget(self.builder_widget)
+        self.splitter.addWidget(self.output_widget)
+        self.splitter.setSizes([600, 400])
+
+    def add_dummy_group(self):
+        name = f"Asset Group {len(self.groups) + 1}"
+        self.add_group(name)
+
+    def add_group(self, name):
+        group = GroupWidget(name, self.tax_manager)
+        group.globalMatrixUpdated.connect(self.on_matrix_updated)
+        self.group_layout.addWidget(group)
+        self.groups.append(group)
         
-        self.right_dock.setWidget(self.right_widget)
-        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.right_dock)
+        # Add the first dummy NameSet immediately for UX demonstration
+        if len(self.groups) == 1:
+            group.on_add_nameset()
+
+    def on_matrix_updated(self):
+        all_matrices = []
+        for g in self.groups:
+            all_matrices.extend(g.get_all_global_matrices())
+        self.current_matrix = all_matrices
+        self.update_output_log()
+
+    def update_output_log(self):
+        self.output_list.clear()
+        append_ext = self.ext_checkbox.isChecked()
+        for string in self.current_matrix:
+            if string and "_" in string or len(string) > 2:
+                final_str = string + ".wav" if append_ext else string
+                self.output_list.addItem(final_str)
+
+    def copy_to_clipboard(self):
+        clipboard = QApplication.clipboard()
+        items = [self.output_list.item(i).text() for i in range(self.output_list.count())]
+        clipboard.setText("\n".join(items))
+
+
+class MainWindow(QMainWindow):
+    def __init__(self, tax_manager: TaxonomyManager):
+        super().__init__()
+        self.tax_manager = tax_manager
+        self.setWindowTitle("Ludexicon - Game Asset Taxonomy Engine")
+        self.resize(1200, 800)
+        
+        self.browser_count = 1
+        self.browsers = []
+        self.builder_count = 0
+        
+        self.init_ui()
+
+    def init_ui(self):
+        # Center Pane: Builders Tabs
+        self.builder_tabs = QTabWidget()
+        self.builder_tabs.setTabsClosable(True)
+        self.builder_tabs.tabCloseRequested.connect(self.close_builder_tab)
+        self.builder_tabs.tabBarDoubleClicked.connect(self.rename_builder_tab)
+        self.setCentralWidget(self.builder_tabs)
+        
+        self.spawn_new_builder()
+
+        # Dock settings
+        self.setDockOptions(QMainWindow.DockOption.AllowNestedDocks | QMainWindow.DockOption.ForceTabbedDocks)
+        self.setTabPosition(Qt.DockWidgetArea.AllDockWidgetAreas, QTabWidget.TabPosition.North)
+
+        # Left Pane: Browser
+        self.left_dock = self.create_browser_dock("Browser")
+        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.left_dock)
         
         self.create_menu_bar()
-        
-        self.current_matrix = []
+
+    def spawn_new_builder(self):
+        self.builder_count += 1
+        builder = BuilderWidget(self.tax_manager, self)
+        name = f"Builder {self.builder_count}"
+        idx = self.builder_tabs.addTab(builder, name)
+        self.builder_tabs.setCurrentIndex(idx)
+        builder.add_dummy_group()
+
+    def close_builder_tab(self, index):
+        if self.builder_tabs.count() > 1:
+            widget = self.builder_tabs.widget(index)
+            self.builder_tabs.removeTab(index)
+            widget.deleteLater()
+
+    def rename_builder_tab(self, index):
+        if index >= 0:
+            current_name = self.builder_tabs.tabText(index)
+            new_name, ok = QInputDialog.getText(self, "Rename Tab", "Enter new builder name:", text=current_name)
+            if ok and new_name:
+                self.builder_tabs.setTabText(index, new_name)
 
     def create_menu_bar(self):
         menubar = self.menuBar()
         
         # File Menu
         file_menu = menubar.addMenu("&File")
+
+        new_builder_action = QAction("New &Builder", self)
+        new_builder_action.setShortcut("Ctrl+T")
+        new_builder_action.triggered.connect(self.spawn_new_builder)
+        file_menu.addAction(new_builder_action)
+        
+        file_menu.addSeparator()
         
         exit_action = QAction("&Exit", self)
         exit_action.setShortcut("Ctrl+Q")
@@ -440,7 +544,6 @@ class MainWindow(QMainWindow):
         
         # Toggle docks visibility
         window_menu.addAction(self.left_dock.toggleViewAction())
-        window_menu.addAction(self.right_dock.toggleViewAction())
         
         # Help Menu
         help_menu = menubar.addMenu("&Help")
@@ -451,6 +554,7 @@ class MainWindow(QMainWindow):
 
     def create_browser_dock(self, title: str) -> QDockWidget:
         dock = QDockWidget(title, self)
+        dock.setTitleBarWidget(DockTitleTab(title, dock))
         dock.setAllowedAreas(Qt.DockWidgetArea.AllDockWidgetAreas)
         
         widget = QWidget()
@@ -462,8 +566,11 @@ class MainWindow(QMainWindow):
         
         tree_view = QTreeView()
         tree_model = QStandardItemModel()
-        tree_model.setHorizontalHeaderLabels(["Lexicon Data"])
+        tree_model.setHorizontalHeaderLabels(["Name", "ID", "Tags"])
         tree_view.setModel(tree_model)
+        
+        tree_view.setColumnWidth(0, 150)
+        tree_view.setColumnWidth(1, 150)
         
         layout.addWidget(tree_view)
         
@@ -507,63 +614,41 @@ class MainWindow(QMainWindow):
         root = tree_model.invisibleRootItem()
         
         # Core
-        core_node = QStandardItem("Core Lexicon")
+        core_node = [QStandardItem("Core Lexicon"), QStandardItem(""), QStandardItem("")]
         for wc_id, wc in self.tax_manager.core_registry["wildcards"].items():
-            wc_item = QStandardItem(f"{wc.name} [{wc_id}]")
-            for el_id, el in self.tax_manager.core_registry["elements"].items():
-                if el.wildcard_id == wc_id:
-                    el_item = QStandardItem(f"{el.name} [{el_id}]")
-                    wc_item.appendRow(el_item)
-            core_node.appendRow(wc_item)
+            wc_name = QStandardItem(wc.name)
+            wc_id_item = QStandardItem(f"[{wc_id}]")
+            wc_tags = QStandardItem("")
+            
+            for v_id, v in self.tax_manager.core_registry["values"].items():
+                if v.wildcard_id == wc_id:
+                    v_name = QStandardItem(v.name)
+                    v_id_item = QStandardItem(f"[{v_id}]")
+                    tags_str = ", ".join(getattr(v, 'tags', []))
+                    v_tags = QStandardItem(tags_str)
+                    wc_name.appendRow([v_name, v_id_item, v_tags])
+            core_node[0].appendRow([wc_name, wc_id_item, wc_tags])
             
         # Project
-        proj_node = QStandardItem("Project Taxonomy")
+        proj_node = [QStandardItem("Project Taxonomy"), QStandardItem(""), QStandardItem("")]
         for wc_id, wc in self.tax_manager.project_registry["wildcards"].items():
-            wc_item = QStandardItem(f"{wc.name} [{wc_id}]")
-            for el_id, el in self.tax_manager.project_registry["elements"].items():
-                if el.wildcard_id == wc_id:
-                    el_item = QStandardItem(f"{el.name} [{el_id}]")
-                    wc_item.appendRow(el_item)
-            proj_node.appendRow(wc_item)
+            wc_name = QStandardItem(wc.name)
+            wc_id_item = QStandardItem(f"[{wc_id}]")
+            wc_tags = QStandardItem("")
+            
+            for v_id, v in self.tax_manager.project_registry["values"].items():
+                if v.wildcard_id == wc_id:
+                    v_name = QStandardItem(v.name)
+                    v_id_item = QStandardItem(f"[{v_id}]")
+                    tags_str = ", ".join(getattr(v, 'tags', []))
+                    v_tags = QStandardItem(tags_str)
+                    wc_name.appendRow([v_name, v_id_item, v_tags])
+            proj_node[0].appendRow([wc_name, wc_id_item, wc_tags])
             
         root.appendRow(core_node)
         root.appendRow(proj_node)
         if tree_view:
             tree_view.expandAll()
-
-    def add_dummy_group(self):
-        name = f"Asset Group {len(self.groups) + 1}"
-        self.add_group(name)
-
-    def add_group(self, name):
-        group = GroupWidget(name, self.tax_manager)
-        group.globalMatrixUpdated.connect(self.on_matrix_updated)
-        self.group_layout.addWidget(group)
-        self.groups.append(group)
-        
-        # Add the first dummy pattern immediately for UX demonstration
-        group.on_add_pattern()
-
-    def on_matrix_updated(self):
-        all_matrices = []
-        for g in self.groups:
-            all_matrices.extend(g.get_all_global_matrices())
-        self.current_matrix = all_matrices
-        self.update_output_log()
-
-    def update_output_log(self):
-        self.output_list.clear()
-        append_ext = self.ext_checkbox.isChecked()
-        for string in self.current_matrix:
-            if string and "_" in string or len(string) > 2:
-                final_str = string + ".wav" if append_ext else string
-                self.output_list.addItem(final_str)
-
-    def copy_to_clipboard(self):
-        clipboard = QApplication.clipboard()
-        items = [self.output_list.item(i).text() for i in range(self.output_list.count())]
-        clipboard.setText("\n".join(items))
-
 
 
 def setup_dummy_data(manager: TaxonomyManager):
@@ -573,25 +658,25 @@ def setup_dummy_data(manager: TaxonomyManager):
     manager.add_item("core", Wildcard("wc.action", "Action"))
     manager.add_item("core", Wildcard("wc.mob_id", "Mob ID"))
     
-    manager.add_item("core", Element(id="el.class.mob", name="Mob", wildcard_id="wc.entity_class", triggers=[Trigger(id="wc.mob_id", delimiter="_")]))
-    manager.add_item("core", Element(id="el.action.melee", name="Melee", wildcard_id="wc.action"))
-    manager.add_item("core", Element(id="el.action.ranged", name="Ranged", wildcard_id="wc.action"))
-    manager.add_item("core", Element(id="el.action.impact", name="Impact", wildcard_id="wc.action"))
-    manager.add_item("core", Element(id="el.action.walk", name="Walk", wildcard_id="wc.action"))
+    manager.add_item("core", Value(id="val.class.mob", name="Mob", wildcard_id="wc.entity_class", triggers=[Trigger(id="wc.mob_id", delimiter="_")]))
+    manager.add_item("core", Value(id="val.action.melee", name="Melee", wildcard_id="wc.action"))
+    manager.add_item("core", Value(id="val.action.ranged", name="Ranged", wildcard_id="wc.action"))
+    manager.add_item("core", Value(id="val.action.impact", name="Impact", wildcard_id="wc.action"))
+    manager.add_item("core", Value(id="val.action.walk", name="Walk", wildcard_id="wc.action"))
     
     # Project
     # Note: to properly show "Mob ID" in the taxonomy tree we should technically register it in project wildcards if it's purely project side,
     # but since it's triggered from core, we registered it in core wildcards.
-    manager.add_item("project", Element(id="el.mob.saltdevil", name="SaltDevil", wildcard_id="wc.mob_id"))
-    manager.add_item("project", Element(id="el.mob.firefiend", name="FireFiend", wildcard_id="wc.mob_id"))
+    manager.add_item("project", Value(id="val.mob.saltdevil", name="SaltDevil", wildcard_id="wc.mob_id"))
+    manager.add_item("project", Value(id="val.mob.firefiend", name="FireFiend", wildcard_id="wc.mob_id"))
     
-    manager.add_item("project", Pattern(
-        id="pat.combat.melee",
+    manager.add_item("project", NameSet(
+        id="ns.combat.melee",
         name="Entity Attack",
-        filename_structure=[
-            PatternComponent(type="wildcard", id="wc.entity_class"),
-            PatternComponent(type="literal", value="_"),
-            PatternComponent(type="wildcard", id="wc.action")
+        nameset_structure=[
+            NameSetComponent(type="wildcard", id="wc.entity_class"),
+            NameSetComponent(type="literal", value="_"),
+            NameSetComponent(type="wildcard", id="wc.action")
         ]
     ))
     
@@ -604,13 +689,28 @@ def main():
     app.setStyleSheet("""
         QMainWindow { background-color: #2b2b2b; color: #e0e0e0; }
         QWidget { background-color: #2b2b2b; color: #e0e0e0; font-family: 'Segoe UI', sans-serif; font-size: 12px; }
-        QDockWidget { border: 1px solid #444; }
-        QDockWidget::title { background: #3c3f41; padding: 4px; text-align: center; }
+        QDockWidget { border: 1px solid #444; titlebar-close-icon: url(''); titlebar-normal-icon: url(''); }
+        QDockWidget::title { background: #1e1e1e; padding: 0px; margin: 0px; }
+        QTabWidget::pane { border: 1px solid #444; background-color: #2b2b2b; top: -1px; }
+        QTabBar { background-color: #1e1e1e; }
+        QTabBar::tab {
+            background-color: #3c3f41;
+            color: #aaaaaa;
+            padding: 4px 12px;
+            border: 1px solid #444;
+            border-bottom: none;
+            border-top-left-radius: 4px;
+            border-top-right-radius: 4px;
+            margin-top: 2px;
+            margin-right: 2px;
+        }
+        QTabBar::tab:first { margin-left: 4px; }
+        QTabBar::tab:selected { background-color: #2b2b2b; color: #e0e0e0; }
         QPushButton { background-color: #3c3f41; border: 1px solid #555; padding: 4px; border-radius: 2px; }
         QPushButton:hover { background-color: #4b4d4f; }
         QPushButton:checked { background-color: #5b5d5f; }
         QLineEdit, QTreeView, QListWidget, QScrollArea { background-color: #1e1e1e; border: 1px solid #3c3f41; }
-        QHeaderView::section { background-color: #3c3f41; padding: 4px; border: 1px solid #333; }
+        QHeaderView::section { background-color: #3c3f41; padding: 2px 4px; border: 1px solid #333; }
         QTreeView::item:hover, QListWidget::item:hover { background-color: #2a2d2f; }
         QTreeView::item:selected, QListWidget::item:selected { background-color: #4b6eaf; }
         QMenu { background-color: #2b2b2b; border: 1px solid #555; }

@@ -1,25 +1,25 @@
 {
-    "el.action.impact": {
+    "val.action.impact": {
         "name": "Impact",
         "status": "approved",
         "wildcard_id": "wc.action"
     },
-    "el.action.melee": {
+    "val.action.melee": {
         "name": "Melee",
         "status": "approved",
         "wildcard_id": "wc.action"
     },
-    "el.action.ranged": {
+    "val.action.ranged": {
         "name": "Ranged",
         "status": "approved",
         "wildcard_id": "wc.action"
     },
-    "el.action.walk": {
+    "val.action.walk": {
         "name": "Walk",
         "status": "approved",
         "wildcard_id": "wc.action"
     },
-    "el.class.mob": {
+    "val.class.mob": {
         "name": "Mob",
         "status": "approved",
         "triggers": [

@@ -10,11 +10,12 @@ class Trigger:
     delimiter: str
 
 @dataclass
-class Element:
+class Value:
     id: str
     name: str
     wildcard_id: str
     status: str = "approved"
+    tags: List[str] = field(default_factory=list)
     triggers: List[Trigger] = field(default_factory=list)
 
     @classmethod
@@ -25,6 +26,7 @@ class Element:
             name=data["name"],
             wildcard_id=data["wildcard_id"],
             status=data.get("status", "approved"),
+            tags=data.get("tags", []),
             triggers=triggers
         )
     
@@ -34,6 +36,8 @@ class Element:
             "status": self.status,
             "wildcard_id": self.wildcard_id
         }
+        if self.tags:
+            d["tags"] = self.tags
         if self.triggers:
             d["triggers"] = [{"id": t.id, "delimiter": t.delimiter} for t in self.triggers]
         return d
@@ -51,7 +55,7 @@ class Wildcard:
         return {"name": self.name}
 
 @dataclass
-class PatternComponent:
+class NameSetComponent:
     type: str  # "wildcard" or "literal"
     id: Optional[str] = None
     value: Optional[str] = None
@@ -64,24 +68,24 @@ class PatternComponent:
         return {"type": self.type}
 
 @dataclass
-class Pattern:
+class NameSet:
     id: str
     name: str
-    filename_structure: List[PatternComponent]
+    nameset_structure: List[NameSetComponent]
 
     @classmethod
     def from_dict(cls, id: str, data: dict):
-        structure = [PatternComponent(**c) for c in data.get("filename_structure", [])]
+        structure = [NameSetComponent(**c) for c in data.get("nameset_structure", [])]
         return cls(
             id=id,
             name=data["name"],
-            filename_structure=structure
+            nameset_structure=structure
         )
 
     def to_dict(self):
         return {
             "name": self.name,
-            "filename_structure": [comp.to_dict() for comp in self.filename_structure]
+            "nameset_structure": [comp.to_dict() for comp in self.nameset_structure]
         }
 
 class TaxonomyManager:
@@ -97,8 +101,8 @@ class TaxonomyManager:
         self.core_path = core_path
         self.project_path = project_path
         
-        self.core_registry = {"wildcards": {}, "elements": {}, "patterns": {}}
-        self.project_registry = {"wildcards": {}, "elements": {}, "patterns": {}}
+        self.core_registry = {"wildcards": {}, "values": {}, "namesets": {}}
+        self.project_registry = {"wildcards": {}, "values": {}, "namesets": {}}
         
     def load(self):
         if os.path.exists(self.core_path):
@@ -116,37 +120,37 @@ class TaxonomyManager:
         for key, value in data.items():
             if key.startswith("wc."):
                 registry["wildcards"][key] = Wildcard.from_dict(key, value)
-            elif key.startswith("el."):
-                registry["elements"][key] = Element.from_dict(key, value)
-            elif key.startswith("pat."):
-                registry["patterns"][key] = Pattern.from_dict(key, value)
+            elif key.startswith("val."):
+                registry["values"][key] = Value.from_dict(key, value)
+            elif key.startswith("ns."):
+                registry["namesets"][key] = NameSet.from_dict(key, value)
                 
-    def add_item(self, source: str, item: Union[Wildcard, Element, Pattern]):
+    def add_item(self, source: str, item: Union[Wildcard, Value, NameSet]):
         registry = self.core_registry if source == "core" else self.project_registry
         if isinstance(item, Wildcard):
             registry["wildcards"][item.id] = item
-        elif isinstance(item, Element):
-            registry["elements"][item.id] = item
-        elif isinstance(item, Pattern):
-            registry["patterns"][item.id] = item
+        elif isinstance(item, Value):
+            registry["values"][item.id] = item
+        elif isinstance(item, NameSet):
+            registry["namesets"][item.id] = item
 
-    def get_element(self, id: str) -> Optional[Element]:
-        return self.core_registry["elements"].get(id) or self.project_registry["elements"].get(id)
+    def get_value(self, id: str) -> Optional[Value]:
+        return self.core_registry["values"].get(id) or self.project_registry["values"].get(id)
         
     def get_wildcard(self, id: str) -> Optional[Wildcard]:
         return self.core_registry["wildcards"].get(id) or self.project_registry["wildcards"].get(id)
         
-    def get_pattern(self, id: str) -> Optional[Pattern]:
-        return self.core_registry["patterns"].get(id) or self.project_registry["patterns"].get(id)
+    def get_nameset(self, id: str) -> Optional[NameSet]:
+        return self.core_registry["namesets"].get(id) or self.project_registry["namesets"].get(id)
 
     def save(self):
         core_out = {}
-        for category in ["wildcards", "elements", "patterns"]:
+        for category in ["wildcards", "values", "namesets"]:
             for k, v in self.core_registry[category].items():
                 core_out[k] = v.to_dict()
                 
         project_out = {}
-        for category in ["wildcards", "elements", "patterns"]:
+        for category in ["wildcards", "values", "namesets"]:
             for k, v in self.project_registry[category].items():
                 project_out[k] = v.to_dict()
                 
@@ -157,21 +161,21 @@ class TaxonomyManager:
         with open(self.project_path, 'w', encoding='utf-8') as f:
             json.dump(project_out, f, indent=4, sort_keys=True)
 
-    def resolve_wildcard(self, wildcard_id: str, selections: Dict[str, List[Element]]) -> List[str]:
+    def resolve_wildcard(self, wildcard_id: str, selections: Dict[str, List[Value]]) -> List[str]:
         """Recursively resolves a wildcard slot into its final list of strings, including triggered associations."""
         results = []
-        selected_elements = selections.get(wildcard_id, [])
-        if not selected_elements:
+        selected_values = selections.get(wildcard_id, [])
+        if not selected_values:
             return [""]
             
-        for element in selected_elements:
-            base_str = element.name
+        for val in selected_values:
+            base_str = val.name
             
-            if not element.triggers:
+            if not val.triggers:
                 results.append(base_str)
             else:
                 current_strings = [base_str]
-                for trigger in element.triggers:
+                for trigger in val.triggers:
                     sub_results = self.resolve_wildcard(trigger.id, selections)
                     next_strings = []
                     for cs in current_strings:
@@ -184,15 +188,15 @@ class TaxonomyManager:
                 results.extend(current_strings)
         return results
 
-    def generate_names(self, pattern_id: str, selections: Dict[str, List[Element]]) -> List[str]:
-        """Generates all permutations of asset names based on a pattern and user selections."""
-        pattern = self.get_pattern(pattern_id)
-        if not pattern:
-            raise ValueError(f"Pattern '{pattern_id}' not found.")
+    def generate_names(self, nameset_id: str, selections: Dict[str, List[Value]]) -> List[str]:
+        """Generates all permutations of asset names based on a NameSet and user selections."""
+        nameset = self.get_nameset(nameset_id)
+        if not nameset:
+            raise ValueError(f"NameSet '{nameset_id}' not found.")
             
         component_results = []
         
-        for comp in pattern.filename_structure:
+        for comp in nameset.nameset_structure:
             if comp.type == "literal":
                 component_results.append([comp.value])
             elif comp.type == "wildcard":
