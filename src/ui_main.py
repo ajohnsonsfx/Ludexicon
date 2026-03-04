@@ -474,6 +474,7 @@ class MainWindow(QMainWindow):
         # Center Pane: Builders Tabs
         self.builder_tabs = QTabWidget()
         self.builder_tabs.setTabsClosable(True)
+        self.builder_tabs.setMovable(True)
         self.builder_tabs.tabCloseRequested.connect(self.close_builder_tab)
         self.builder_tabs.tabBarDoubleClicked.connect(self.rename_builder_tab)
         self.setCentralWidget(self.builder_tabs)
@@ -691,6 +692,7 @@ def main():
         QWidget { background-color: #2b2b2b; color: #e0e0e0; font-family: 'Segoe UI', sans-serif; font-size: 12px; }
         QDockWidget { border: 1px solid #444; titlebar-close-icon: url(''); titlebar-normal-icon: url(''); }
         QDockWidget::title { background: #1e1e1e; padding: 0px; margin: 0px; }
+        QTabWidget { background-color: #1e1e1e; }
         QTabWidget::pane { border: 1px solid #444; background-color: #2b2b2b; top: -1px; }
         QTabBar { background-color: #1e1e1e; }
         QTabBar::tab {
