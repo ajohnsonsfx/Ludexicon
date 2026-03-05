@@ -17,6 +17,7 @@ class Value:
     status: str = "approved"
     tags: List[str] = field(default_factory=list)
     triggers: List[Trigger] = field(default_factory=list)
+    aliases: List[str] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, id: str, data: dict):
@@ -27,7 +28,8 @@ class Value:
             wildcard_id=data["wildcard_id"],
             status=data.get("status", "approved"),
             tags=data.get("tags", []),
-            triggers=triggers
+            triggers=triggers,
+            aliases=data.get("aliases", [])
         )
     
     def to_dict(self):
@@ -40,6 +42,8 @@ class Value:
             d["tags"] = self.tags
         if self.triggers:
             d["triggers"] = [{"id": t.id, "delimiter": t.delimiter} for t in self.triggers]
+        if self.aliases:
+            d["aliases"] = self.aliases
         return d
 
 @dataclass

@@ -15,6 +15,7 @@ from PyQt6.QtCore import Qt, pyqtSignal, QEvent
 from PyQt6.QtGui import QStandardItemModel, QStandardItem, QAction
 
 from logic import TaxonomyManager, Value, NameSet, Wildcard, NameSetComponent, Trigger
+from ui_ingest import TaxonomyIngestDialog
 
 
 class MultiSelectComboBox(QPushButton):
@@ -524,12 +525,18 @@ class MainWindow(QMainWindow):
         file_menu.addAction(new_builder_action)
         
         file_menu.addSeparator()
+
+        ingest_action = QAction("Ingest Taxonomy...", self)
+        ingest_action.triggered.connect(self.open_ingest_tool)
+        file_menu.addAction(ingest_action)
+        
+        file_menu.addSeparator()
         
         exit_action = QAction("&Exit", self)
         exit_action.setShortcut("Ctrl+Q")
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
-        
+
         # Edit Menu
         edit_menu = menubar.addMenu("&Edit")
         # Placeholder for future edit actions
@@ -552,6 +559,13 @@ class MainWindow(QMainWindow):
         about_action = QAction("&About", self)
         about_action.triggered.connect(self.show_about)
         help_menu.addAction(about_action)
+
+    def open_ingest_tool(self):
+        dialog = TaxonomyIngestDialog(self.tax_manager, self)
+        dialog.exec()
+        
+        # In Phase 5, we'll refresh the trees after the dialog closes
+        self.populate_lexicon_tree()
 
     def create_browser_dock(self, title: str) -> QDockWidget:
         dock = QDockWidget(title, self)
