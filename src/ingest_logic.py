@@ -40,8 +40,43 @@ class TaxonomyIngestEngine:
         self.tax_mgr = taxonomy_manager
         self.pending_assets: List[ParsedAsset] = []
         
+        self.ignore_variations = False
+        self.ignore_versions = False
+        self.ignore_dates = False
+        
         # Pre-compute all known valid string permutations to accelerate the 'skip' check
         self._known_names = self._build_known_names_cache()
+
+    def clean_name(self, name: str) -> str:
+        changed = True
+        while changed:
+            changed = False
+            
+            if self.ignore_dates:
+                # Matches YYYYMMDD, YYMMDD, YYYY-MM-DD
+                date_match = re.search(r'([_\-]?(?:\d{8}|\d{6}|\d{4}-\d{2}-\d{2}))$', name)
+                if date_match and date_match.start() > 0:
+                    name = name[:date_match.start()]
+                    changed = True
+                    continue
+                    
+            if self.ignore_versions:
+                # Matches v1, v01, V2.0, etc.
+                ver_match = re.search(r'([_\-]?v\d+(?:\.\d+)?)$', name, re.IGNORECASE)
+                if ver_match and ver_match.start() > 0:
+                    name = name[:ver_match.start()]
+                    changed = True
+                    continue
+                    
+            if self.ignore_variations:
+                # Matches numbers at the end
+                var_match = re.search(r'([_\-]?\d+)$', name)
+                if var_match and var_match.start() > 0:
+                    name = name[:var_match.start()]
+                    changed = True
+                    continue
+                    
+        return name
 
     def _build_known_names_cache(self) -> Set[str]:
         """
@@ -156,6 +191,10 @@ class TaxonomyIngestEngine:
             else:
                 name_no_ext = name
 
+            name_no_ext = self.clean_name(name_no_ext)
+            if not name_no_ext:
+                continue
+
             is_known = name_no_ext in self._known_names
             
             if is_known:
@@ -259,8 +298,9 @@ class TaxonomyIngestEngine:
                 # If ALL unique tokens in this slot are delimiters, treat it as a LITERAL.
                 is_delimiter = all(t in ['_', '-'] for t in unique_tokens)
                 
-                # Strict literals: exactly 1 token across all files, OR it's a delimiter slot
-                if len(unique_tokens) == 1 or is_delimiter:
+                # Strict literals: exactly 1 token across all files (AND group_size > 1 to prove constancy), OR it's a delimiter slot
+                # If group_size == 1, we assume non-delimiters are wildcards so pieces can be extracted
+                if is_delimiter or (len(unique_tokens) == 1 and group_size > 1):
                     # If it's a messy delimiter slot, pick the most common delimiter
                     if is_delimiter:
                         literal_val = max(freq.items(), key=lambda x: x[1])[0]

@@ -66,6 +66,17 @@ class TaxonomyIngestDialog(QDialog):
         self.input_area.setMaximumHeight(150)
         self.input_layout.addWidget(self.input_area)
         
+        self.options_layout = QHBoxLayout()
+        self.options_layout.addWidget(QLabel("Ignore Suffixes:"))
+        self.chk_ignore_vars = QCheckBox("Variations (e.g. _01, 02)")
+        self.chk_ignore_versions = QCheckBox("Versions (e.g. _v01, v2.0)")
+        self.chk_ignore_dates = QCheckBox("Dates (e.g. _20240101)")
+        self.options_layout.addWidget(self.chk_ignore_vars)
+        self.options_layout.addWidget(self.chk_ignore_versions)
+        self.options_layout.addWidget(self.chk_ignore_dates)
+        self.options_layout.addStretch()
+        self.input_layout.addLayout(self.options_layout)
+
         self.analyze_btn = QPushButton("Analyze Input")
         self.analyze_btn.clicked.connect(self.on_analyze_clicked)
         self.analyze_btn.setStyleSheet("background-color: #48669c; font-weight: bold; padding: 5px;")
@@ -160,6 +171,10 @@ class TaxonomyIngestDialog(QDialog):
                     names.append(cleaned)
                     
         if names:
+            self.engine.ignore_variations = self.chk_ignore_vars.isChecked()
+            self.engine.ignore_versions = self.chk_ignore_versions.isChecked()
+            self.engine.ignore_dates = self.chk_ignore_dates.isChecked()
+
             self.status_label.setText("Processing input...")
             self.engine.pending_assets.clear()
             self.engine.process_raw_names("Input Box", names)
