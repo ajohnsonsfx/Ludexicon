@@ -463,7 +463,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.tax_manager = tax_manager
         self.setWindowTitle("Ludexicon - Game Asset Taxonomy Engine")
-        self.resize(1200, 800)
+        self.resize(1800, 900)
         
         self.browser_count = 1
         self.browsers = []
@@ -489,6 +489,9 @@ class MainWindow(QMainWindow):
         # Left Pane: Browser
         self.left_dock = self.create_browser_dock("Browser")
         self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.left_dock)
+        
+        # Ensure the browser dock is significantly wider by default
+        self.resizeDocks([self.left_dock], [700], Qt.Orientation.Horizontal)
         
         self.create_menu_bar()
 
@@ -584,8 +587,9 @@ class MainWindow(QMainWindow):
         tree_model.setHorizontalHeaderLabels(["Name", "ID", "Tags"])
         tree_view.setModel(tree_model)
         
-        tree_view.setColumnWidth(0, 150)
-        tree_view.setColumnWidth(1, 150)
+        tree_view.setColumnWidth(0, 300)
+        tree_view.setColumnWidth(1, 200)
+        tree_view.setColumnWidth(2, 200)
         
         layout.addWidget(tree_view)
         
