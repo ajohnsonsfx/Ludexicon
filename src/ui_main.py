@@ -522,13 +522,6 @@ class MainWindow(QMainWindow):
         # File Menu
         file_menu = menubar.addMenu("&File")
 
-        new_builder_action = QAction("New &Builder", self)
-        new_builder_action.setShortcut("Ctrl+T")
-        new_builder_action.triggered.connect(self.spawn_new_builder)
-        file_menu.addAction(new_builder_action)
-        
-        file_menu.addSeparator()
-
         ingest_action = QAction("Ingest Taxonomy...", self)
         ingest_action.triggered.connect(self.open_ingest_tool)
         file_menu.addAction(ingest_action)
@@ -546,6 +539,13 @@ class MainWindow(QMainWindow):
         
         # Window Menu
         window_menu = menubar.addMenu("&Window")
+        
+        new_builder_action = QAction("New &Builder", self)
+        new_builder_action.setShortcut("Ctrl+T")
+        new_builder_action.triggered.connect(self.spawn_new_builder)
+        window_menu.addAction(new_builder_action)
+        
+        window_menu.addSeparator()
         
         # Spawn New Browser
         new_browser_action = QAction("&New Browser", self)
