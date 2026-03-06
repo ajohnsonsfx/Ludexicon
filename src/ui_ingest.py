@@ -138,8 +138,8 @@ class TaxonomyIngestDialog(QDialog):
         extracted_names = []
         for path in paths:
             if os.path.isdir(path):
-                for f in os.listdir(path):
-                    if os.path.isfile(os.path.join(path, f)):
+                for dirpath, dirnames, filenames in os.walk(path):
+                    for f in filenames:
                         name, _ = os.path.splitext(f)
                         extracted_names.append(name)
             elif os.path.isfile(path) and path.lower().endswith(('.csv', '.txt')):
@@ -157,6 +157,7 @@ class TaxonomyIngestDialog(QDialog):
                 self.input_area.setPlainText(current_text + "\n" + new_text)
             else:
                 self.input_area.setPlainText(new_text)
+            self.status_label.setText(f"{len(extracted_names)} names loaded. Click 'Analyze Input' to continue.")
 
     def on_analyze_clicked(self):
         text = self.input_area.toPlainText().strip()

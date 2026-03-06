@@ -215,7 +215,7 @@ class TaxonomyIngestEngine:
 
     def process_directory(self, dir_path: str):
         """
-        Scans a directory (non-recursive for now, top-level files only), 
+        Recursively scans a directory for files,
         checks if they are known, and tokenizes unknown files.
         """
         self.pending_assets.clear()
@@ -224,9 +224,8 @@ class TaxonomyIngestEngine:
             return
             
         names_to_process = []
-        for file in os.listdir(dir_path):
-            full_path = os.path.join(dir_path, file)
-            if os.path.isfile(full_path):
+        for dirpath, dirnames, filenames in os.walk(dir_path):
+            for file in filenames:
                 names_to_process.append(file)
                 
         self.process_raw_names(f"Dir: {os.path.basename(dir_path)}", names_to_process)
