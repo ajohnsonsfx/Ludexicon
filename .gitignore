@@ -205,3 +205,10 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Ludexicon user data — excluded so project files stay private.
+# The defaults/ folder provides seed files for first-time setup.
+data/
+
+# Runtime log
+ludexicon.log

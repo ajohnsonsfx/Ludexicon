@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 from dataclasses import dataclass, field, asdict
 from typing import List, Dict, Optional, Union
 import itertools
@@ -107,6 +108,23 @@ class TaxonomyManager:
         
         self.core_registry = {"wildcards": {}, "values": {}, "namesets": {}}
         self.project_registry = {"wildcards": {}, "values": {}, "namesets": {}}
+
+        # Seed data folder from defaults/ if it's missing files
+        self._seed_data_dir()
+
+    def _seed_data_dir(self):
+        """Copies default JSON files into the data directory if they don't exist yet.
+        This allows data/ to be .gitignored while still working out of the box."""
+        root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        defaults_dir = os.path.join(root_dir, "defaults")
+        if not os.path.isdir(defaults_dir):
+            return
+        data_dir = os.path.dirname(self.core_path)
+        os.makedirs(data_dir, exist_ok=True)
+        for filename in os.listdir(defaults_dir):
+            dest = os.path.join(data_dir, filename)
+            if not os.path.exists(dest):
+                shutil.copy2(os.path.join(defaults_dir, filename), dest)
         
     def load(self):
         if os.path.exists(self.core_path):

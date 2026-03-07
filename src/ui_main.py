@@ -625,49 +625,56 @@ class MainWindow(QMainWindow):
             "Version 0.1")
 
     def populate_lexicon_tree(self, tree_model=None, tree_view=None):
-        if tree_model is None:
-            tree_model = getattr(self, 'tree_model', None)
-        if tree_view is None:
-            tree_view = getattr(self, 'tree_view', None)
-
-        root = tree_model.invisibleRootItem()
-        
-        # Core
-        core_node = [QStandardItem("Core Lexicon"), QStandardItem(""), QStandardItem("")]
-        for wc_id, wc in self.tax_manager.core_registry["wildcards"].items():
-            wc_name = QStandardItem(wc.name)
-            wc_id_item = QStandardItem(f"[{wc_id}]")
-            wc_tags = QStandardItem("")
+        """Refreshes one or all open browser docks with the latest taxonomy data."""
+        targets = []
+        if tree_model and tree_view:
+            targets.append((tree_model, tree_view))
+        else:
+            for dock in self.browsers:
+                if dock.tree_model:
+                    targets.append((dock.tree_model, dock.tree_view))
+                    
+        for tree_model, tree_view in targets:
+            tree_model.clear()
+            tree_model.setHorizontalHeaderLabels(["Name", "ID", "Tags"])
+            root = tree_model.invisibleRootItem()
             
-            for v_id, v in self.tax_manager.core_registry["values"].items():
-                if v.wildcard_id == wc_id:
-                    v_name = QStandardItem(v.name)
-                    v_id_item = QStandardItem(f"[{v_id}]")
-                    tags_str = ", ".join(getattr(v, 'tags', []))
-                    v_tags = QStandardItem(tags_str)
-                    wc_name.appendRow([v_name, v_id_item, v_tags])
-            core_node[0].appendRow([wc_name, wc_id_item, wc_tags])
-            
-        # Project
-        proj_node = [QStandardItem("Project Taxonomy"), QStandardItem(""), QStandardItem("")]
-        for wc_id, wc in self.tax_manager.project_registry["wildcards"].items():
-            wc_name = QStandardItem(wc.name)
-            wc_id_item = QStandardItem(f"[{wc_id}]")
-            wc_tags = QStandardItem("")
-            
-            for v_id, v in self.tax_manager.project_registry["values"].items():
-                if v.wildcard_id == wc_id:
-                    v_name = QStandardItem(v.name)
-                    v_id_item = QStandardItem(f"[{v_id}]")
-                    tags_str = ", ".join(getattr(v, 'tags', []))
-                    v_tags = QStandardItem(tags_str)
-                    wc_name.appendRow([v_name, v_id_item, v_tags])
-            proj_node[0].appendRow([wc_name, wc_id_item, wc_tags])
-            
-        root.appendRow(core_node)
-        root.appendRow(proj_node)
-        if tree_view:
-            tree_view.expandAll()
+            # Core
+            core_node = [QStandardItem("Core Lexicon"), QStandardItem(""), QStandardItem("")]
+            for wc_id, wc in self.tax_manager.core_registry["wildcards"].items():
+                wc_name = QStandardItem(wc.name)
+                wc_id_item = QStandardItem(f"[{wc_id}]")
+                wc_tags = QStandardItem("")
+                
+                for v_id, v in self.tax_manager.core_registry["values"].items():
+                    if v.wildcard_id == wc_id:
+                        v_name = QStandardItem(v.name)
+                        v_id_item = QStandardItem(f"[{v_id}]")
+                        tags_str = ", ".join(getattr(v, 'tags', []))
+                        v_tags = QStandardItem(tags_str)
+                        wc_name.appendRow([v_name, v_id_item, v_tags])
+                core_node[0].appendRow([wc_name, wc_id_item, wc_tags])
+                
+            # Project
+            proj_node = [QStandardItem("Project Taxonomy"), QStandardItem(""), QStandardItem("")]
+            for wc_id, wc in self.tax_manager.project_registry["wildcards"].items():
+                wc_name = QStandardItem(wc.name)
+                wc_id_item = QStandardItem(f"[{wc_id}]")
+                wc_tags = QStandardItem("")
+                
+                for v_id, v in self.tax_manager.project_registry["values"].items():
+                    if v.wildcard_id == wc_id:
+                        v_name = QStandardItem(v.name)
+                        v_id_item = QStandardItem(f"[{v_id}]")
+                        tags_str = ", ".join(getattr(v, 'tags', []))
+                        v_tags = QStandardItem(tags_str)
+                        wc_name.appendRow([v_name, v_id_item, v_tags])
+                proj_node[0].appendRow([wc_name, wc_id_item, wc_tags])
+                
+            root.appendRow(core_node)
+            root.appendRow(proj_node)
+            if tree_view:
+                tree_view.expandAll()
 
 
 def setup_dummy_data(manager: TaxonomyManager):
