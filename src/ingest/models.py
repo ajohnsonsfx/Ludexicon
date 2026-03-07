@@ -15,6 +15,7 @@ class ParsedAsset:
     matched_nameset_id: Optional[str] = None
     skip_reason: Optional[str] = None
     confidence: float = 0.0
+    source_label: str = ""  # which import batch this came from
 
 
 @dataclass
@@ -59,6 +60,7 @@ class StagingSession:
     candidate_wildcards: Dict[str, CandidateWildcard] = field(default_factory=dict)
     dedup_matches: List[DedupMatch] = field(default_factory=list)
     categories: List[str] = field(default_factory=list)
+    source_groups: Dict[str, List[str]] = field(default_factory=dict)  # source_label -> filenames
     total_input_count: int = 0
 
     def __post_init__(self):
@@ -69,6 +71,7 @@ class StagingSession:
         return {
             "session_id": self.session_id,
             "categories": self.categories,
+            "source_groups": self.source_groups,
             "total_input_count": self.total_input_count,
             "candidate_namesets": [
                 {
@@ -105,6 +108,7 @@ class StagingSession:
     def from_dict(cls, data: dict) -> "StagingSession":
         session = cls(session_id=data.get("session_id", ""))
         session.categories = data.get("categories", [])
+        session.source_groups = data.get("source_groups", {})
         session.total_input_count = data.get("total_input_count", 0)
 
         # Rebuild candidate wildcards first (needed for reference)

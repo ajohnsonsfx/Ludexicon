@@ -1,7 +1,11 @@
 """
 TaxonomyIngestDialog — full ingestion workspace dialog.
 
-Handles the complete workflow: file import → analysis → organize → stage → commit.
+Redesigned layout:
+  Left sidebar: Import controls + source tree
+  Center: Three-tab workflow (Patterns / Slots / Values)
+  Right sidebar: Progress tracker
+  Bottom: Staging area + commit
 """
 import os
 from PyQt6.QtWidgets import (
@@ -9,7 +13,7 @@ from PyQt6.QtWidgets import (
     QTreeWidget, QTreeWidgetItem, QPushButton, QFrame,
     QScrollArea, QWidget, QCheckBox, QMenu, QInputDialog,
     QListWidget, QListWidgetItem, QAbstractItemView,
-    QLineEdit, QMessageBox, QFileDialog,
+    QLineEdit, QMessageBox, QFileDialog, QTabWidget,
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QPoint
 from PyQt6.QtGui import QColor, QBrush
@@ -19,6 +23,8 @@ from ingest.engine import TaxonomyIngestEngine
 from ingest.models import CandidateNameSet, StagingSession
 from ui.ingest.input_area import IngestInputArea
 from ui.ingest.category_bucket import DraggableNameSetList, CategoryBucket
+from ui.ingest.source_tree import ImportSourceTree
+from ui.ingest.progress_panel import ProgressPanel
 
 
 class TaxonomyIngestDialog(QDialog):
@@ -28,7 +34,7 @@ class TaxonomyIngestDialog(QDialog):
         self.engine = TaxonomyIngestEngine(tax_manager)
 
         self.setWindowTitle("Ingestion Workspace")
-        self.resize(1400, 900)
+        self.resize(1500, 900)
 
         self.session: StagingSession = None
         self.category_buckets: dict = {}  # name -> CategoryBucket
@@ -79,79 +85,153 @@ class TaxonomyIngestDialog(QDialog):
             }
             QSplitter::handle { background-color: #333; }
             QScrollArea { border: none; }
+            QTabWidget::pane {
+                border: 1px solid #333;
+                background-color: #1a1a2e;
+                border-radius: 4px;
+            }
+            QTabBar::tab {
+                background-color: #1e1e2e;
+                color: #aaa;
+                padding: 8px 20px;
+                border: 1px solid #333;
+                border-bottom: none;
+                border-top-left-radius: 4px;
+                border-top-right-radius: 4px;
+                margin-right: 2px;
+                font-size: 12px;
+            }
+            QTabBar::tab:selected {
+                background-color: #1a1a2e;
+                color: #8ab4f8;
+                font-weight: bold;
+            }
+            QTabBar::tab:hover {
+                background-color: #2a2a4e;
+            }
         """)
 
-        # ─── Phase 1: Import ─────────────────────────────────────
-        import_frame = QFrame()
-        import_frame.setStyleSheet("QFrame { background-color: #1a1a2e; border-radius: 6px; padding: 4px; }")
-        import_layout = QVBoxLayout(import_frame)
-        import_layout.setContentsMargins(8, 8, 8, 8)
-        import_layout.setSpacing(4)
+        # ═══════════════════════════════════════════════════════════════
+        #  MAIN HORIZONTAL LAYOUT: Left sidebar | Center workspace | Right sidebar
+        # ═══════════════════════════════════════════════════════════════
+        main_splitter = QSplitter(Qt.Orientation.Horizontal)
 
-        import_header = QLabel("\u2460 Import Files")
+        # ─── LEFT SIDEBAR: Import ─────────────────────────────────────
+        left_sidebar = QFrame()
+        left_sidebar.setMinimumWidth(260)
+        left_sidebar.setMaximumWidth(360)
+        left_sidebar.setStyleSheet("QFrame { background-color: #151520; border-radius: 6px; }")
+        left_layout = QVBoxLayout(left_sidebar)
+        left_layout.setContentsMargins(8, 8, 8, 8)
+        left_layout.setSpacing(6)
+
+        import_header = QLabel("① Import Files")
         import_header.setStyleSheet("font-size: 14px; font-weight: bold; color: #8ab4f8;")
-        import_layout.addWidget(import_header)
+        left_layout.addWidget(import_header)
+
+        import_help = QLabel(
+            "Drop folders, CSV files, or paste filenames below.\n"
+            "The tool will extract and analyze asset names."
+        )
+        import_help.setStyleSheet("color: #777; font-size: 10px; padding: 2px;")
+        import_help.setWordWrap(True)
+        left_layout.addWidget(import_help)
 
         self.input_area = IngestInputArea()
         self.input_area.filesDropped.connect(self._on_files_dropped)
-        self.input_area.setMaximumHeight(100)
-        import_layout.addWidget(self.input_area)
+        self.input_area.setMaximumHeight(80)
+        self.input_area.setMinimumHeight(60)
+        left_layout.addWidget(self.input_area)
 
-        options_row = QHBoxLayout()
-        options_row.addWidget(QLabel("Strip suffixes:"))
+        # Options
+        options_frame = QFrame()
+        options_layout = QVBoxLayout(options_frame)
+        options_layout.setContentsMargins(0, 0, 0, 0)
+        options_layout.setSpacing(2)
+        strip_label = QLabel("Strip suffixes:")
+        strip_label.setStyleSheet("color: #999; font-size: 11px;")
+        options_layout.addWidget(strip_label)
         self.chk_ignore_vars = QCheckBox("Variations (_01, 02)")
         self.chk_ignore_versions = QCheckBox("Versions (_v01)")
         self.chk_ignore_dates = QCheckBox("Dates (_20240101)")
         self.chk_ignore_vars.setChecked(True)
         for chk in (self.chk_ignore_vars, self.chk_ignore_versions, self.chk_ignore_dates):
-            chk.setStyleSheet("QCheckBox { color: #bbb; }")
-            options_row.addWidget(chk)
-        options_row.addStretch()
+            chk.setStyleSheet("QCheckBox { color: #bbb; font-size: 11px; }")
+            options_layout.addWidget(chk)
+        left_layout.addWidget(options_frame)
 
-        self.btn_analyze = QPushButton("\u26a1 Analyze")
-        self.btn_analyze.setStyleSheet("background-color: #1a5276; font-weight: bold; padding: 6px 20px;")
+        # Buttons row
+        btn_row = QVBoxLayout()
+        self.btn_analyze = QPushButton("⚡ Analyze")
+        self.btn_analyze.setStyleSheet("background-color: #1a5276; font-weight: bold; padding: 8px;")
         self.btn_analyze.clicked.connect(self._on_analyze)
-        options_row.addWidget(self.btn_analyze)
+        btn_row.addWidget(self.btn_analyze)
 
-        self.btn_load_session = QPushButton("\U0001f4c2 Load Session")
+        self.btn_load_session = QPushButton("📂 Load Session")
         self.btn_load_session.clicked.connect(self._on_load_session)
-        options_row.addWidget(self.btn_load_session)
+        btn_row.addWidget(self.btn_load_session)
+        left_layout.addLayout(btn_row)
 
-        import_layout.addLayout(options_row)
-
-        # Dedup summary bar (hidden until we have results)
+        # Dedup summary (hidden until results)
         self.dedup_frame = QFrame()
         self.dedup_frame.setStyleSheet("QFrame { background-color: #1a3a2e; border-radius: 4px; padding: 4px; }")
         self.dedup_frame.setVisible(False)
-        dedup_layout = QHBoxLayout(self.dedup_frame)
-        dedup_layout.setContentsMargins(8, 4, 8, 4)
+        dedup_layout = QVBoxLayout(self.dedup_frame)
+        dedup_layout.setContentsMargins(6, 4, 6, 4)
         self.dedup_label = QLabel()
-        self.dedup_label.setStyleSheet("color: #8bc34a; font-weight: bold;")
+        self.dedup_label.setStyleSheet("color: #8bc34a; font-size: 11px; font-weight: bold;")
+        self.dedup_label.setWordWrap(True)
         dedup_layout.addWidget(self.dedup_label)
-        dedup_layout.addStretch()
-        self.btn_show_matches = QPushButton("Show Matches \u25be")
-        self.btn_show_matches.setStyleSheet("background-color: transparent; color: #8bc34a; border: none; text-decoration: underline;")
+        self.btn_show_matches = QPushButton("Show Matches ▾")
+        self.btn_show_matches.setStyleSheet("background-color: transparent; color: #8bc34a; border: none; text-decoration: underline; font-size: 11px;")
         self.btn_show_matches.clicked.connect(self._toggle_match_details)
         dedup_layout.addWidget(self.btn_show_matches)
-        import_layout.addWidget(self.dedup_frame)
-
         self.match_details_tree = QTreeWidget()
         self.match_details_tree.setHeaderLabels(["Matched Filename", "Matched Pattern"])
         self.match_details_tree.setVisible(False)
-        self.match_details_tree.setMaximumHeight(150)
-        import_layout.addWidget(self.match_details_tree)
+        self.match_details_tree.setMaximumHeight(120)
+        dedup_layout.addWidget(self.match_details_tree)
+        left_layout.addWidget(self.dedup_frame)
 
-        root.addWidget(import_frame)
+        # Source tree
+        self.source_tree = ImportSourceTree()
+        left_layout.addWidget(self.source_tree, stretch=1)
 
-        # ─── Phase 2: Organize Workspace ──────────────────────────
-        workspace_splitter = QSplitter(Qt.Orientation.Horizontal)
+        main_splitter.addWidget(left_sidebar)
 
-        # Left: Unsorted items
+        # ─── CENTER: Tab Workspace ────────────────────────────────────
+        center_frame = QFrame()
+        center_layout = QVBoxLayout(center_frame)
+        center_layout.setContentsMargins(4, 4, 4, 4)
+        center_layout.setSpacing(4)
+
+        self.workspace_tabs = QTabWidget()
+
+        # --- Patterns Tab ---
+        patterns_widget = QWidget()
+        patterns_layout = QVBoxLayout(patterns_widget)
+        patterns_layout.setContentsMargins(8, 8, 8, 8)
+        patterns_layout.setSpacing(4)
+
+        patterns_help = QLabel(
+            "🔍 Patterns represent naming structures found in your files. "
+            "Each pattern shows how filenames are composed of literal text and variable slots.\n\n"
+            "• Select a pattern to see its details on the right\n"
+            "• Right-click for more options (rename, stage, discard)\n"
+            "• Stage patterns when you're satisfied with their structure"
+        )
+        patterns_help.setStyleSheet("color: #888; font-size: 11px; padding: 6px; background-color: #1a1a2e; border-radius: 4px;")
+        patterns_help.setWordWrap(True)
+        patterns_layout.addWidget(patterns_help)
+
+        patterns_splitter = QSplitter(Qt.Orientation.Horizontal)
+
+        # Left: Unsorted patterns list
         unsorted_frame = QFrame()
         unsorted_layout = QVBoxLayout(unsorted_frame)
-        unsorted_layout.setContentsMargins(4, 4, 4, 4)
-        unsorted_header = QLabel("Unsorted Items")
-        unsorted_header.setStyleSheet("font-size: 13px; font-weight: bold; color: #f0ad4e;")
+        unsorted_layout.setContentsMargins(0, 0, 0, 0)
+        unsorted_header = QLabel("Discovered Patterns")
+        unsorted_header.setStyleSheet("font-size: 12px; font-weight: bold; color: #f0ad4e;")
         unsorted_layout.addWidget(unsorted_header)
         self.unsorted_list = DraggableNameSetList()
         self.unsorted_list.itemClicked.connect(self._on_item_selected)
@@ -160,23 +240,148 @@ class TaxonomyIngestDialog(QDialog):
         unsorted_layout.addWidget(self.unsorted_list)
 
         unsorted_btn_row = QHBoxLayout()
-        self.btn_stage_selected = QPushButton("Stage Selected \u25b8")
+        self.btn_stage_selected = QPushButton("Stage Selected ▸")
         self.btn_stage_selected.setStyleSheet("background-color: #2d5a27; font-weight: bold;")
         self.btn_stage_selected.clicked.connect(self._stage_selected_items)
         unsorted_btn_row.addWidget(self.btn_stage_selected)
         unsorted_btn_row.addStretch()
         unsorted_layout.addLayout(unsorted_btn_row)
 
-        workspace_splitter.addWidget(unsorted_frame)
+        patterns_splitter.addWidget(unsorted_frame)
 
-        # Center: Categories
-        cat_frame = QFrame()
-        cat_layout = QVBoxLayout(cat_frame)
-        cat_layout.setContentsMargins(4, 4, 4, 4)
+        # Right: Pattern detail panel
+        detail_frame = QFrame()
+        detail_layout = QVBoxLayout(detail_frame)
+        detail_layout.setContentsMargins(4, 0, 0, 0)
+        detail_header = QLabel("Pattern Details")
+        detail_header.setStyleSheet("font-size: 12px; font-weight: bold; color: #bb86fc;")
+        detail_layout.addWidget(detail_header)
+
+        name_row = QHBoxLayout()
+        name_row.addWidget(QLabel("Name:"))
+        self.ns_name_edit = QLineEdit()
+        self.ns_name_edit.setPlaceholderText("Select a pattern to see details")
+        self.ns_name_edit.editingFinished.connect(self._on_ns_name_edited)
+        name_row.addWidget(self.ns_name_edit)
+        detail_layout.addLayout(name_row)
+
+        self.structure_label = QLabel("Structure: —")
+        self.structure_label.setStyleSheet("color: #aaa; font-family: monospace; padding: 4px;")
+        detail_layout.addWidget(self.structure_label)
+
+        wc_label = QLabel("Slots:")
+        wc_label.setStyleSheet("font-weight: bold; margin-top: 4px;")
+        detail_layout.addWidget(wc_label)
+        self.wc_tree = QTreeWidget()
+        self.wc_tree.setHeaderLabels(["Slot Name", "Values", "Confidence"])
+        self.wc_tree.setColumnWidth(0, 150)
+        self.wc_tree.setColumnWidth(1, 120)
+        self.wc_tree.itemDoubleClicked.connect(self._on_wc_rename)
+        detail_layout.addWidget(self.wc_tree)
+
+        ex_label = QLabel("Example filenames:")
+        ex_label.setStyleSheet("font-weight: bold; margin-top: 4px;")
+        detail_layout.addWidget(ex_label)
+        self.example_list = QListWidget()
+        self.example_list.setMaximumHeight(100)
+        self.example_list.setStyleSheet("""
+            QListWidget { background-color: #1a1a2e; border: 1px solid #333; border-radius: 3px; }
+            QListWidget::item { color: #aaa; padding: 2px 6px; font-family: monospace; font-size: 11px; }
+        """)
+        detail_layout.addWidget(self.example_list)
+
+        patterns_splitter.addWidget(detail_frame)
+        patterns_splitter.setSizes([350, 400])
+
+        patterns_layout.addWidget(patterns_splitter)
+        self.workspace_tabs.addTab(patterns_widget, "🔍 Patterns")
+
+        # --- Slots Tab ---
+        slots_widget = QWidget()
+        slots_layout = QVBoxLayout(slots_widget)
+        slots_layout.setContentsMargins(8, 8, 8, 8)
+        slots_layout.setSpacing(4)
+
+        slots_help = QLabel(
+            "🎰 Slots are the variable parts of your naming patterns. "
+            "For example, in 'Rifle_Shoot', both 'Rifle' and 'Shoot' are slots "
+            "representing a Weapon and an Action.\n\n"
+            "• Double-click a slot name to rename it\n"
+            "• Review the values discovered for each slot\n"
+            "• Slots are shared across patterns that use the same variable"
+        )
+        slots_help.setStyleSheet("color: #888; font-size: 11px; padding: 6px; background-color: #1a1a2e; border-radius: 4px;")
+        slots_help.setWordWrap(True)
+        slots_layout.addWidget(slots_help)
+
+        self.slots_tree = QTreeWidget()
+        self.slots_tree.setHeaderLabels(["Slot Name", "# Values", "Confidence", "Used In"])
+        self.slots_tree.setColumnWidth(0, 180)
+        self.slots_tree.setColumnWidth(1, 80)
+        self.slots_tree.setColumnWidth(2, 80)
+        self.slots_tree.itemDoubleClicked.connect(self._on_slot_rename)
+        self.slots_tree.setStyleSheet("""
+            QTreeWidget {
+                background-color: #1a1a2e;
+                border: 1px solid #333;
+                border-radius: 4px;
+                font-size: 12px;
+            }
+            QTreeWidget::item { padding: 4px; color: #ddd; }
+            QTreeWidget::item:selected { background-color: #3a3a5e; }
+        """)
+        slots_layout.addWidget(self.slots_tree)
+        self.workspace_tabs.addTab(slots_widget, "🎰 Slots")
+
+        # --- Values Tab ---
+        values_widget = QWidget()
+        values_layout = QVBoxLayout(values_widget)
+        values_layout.setContentsMargins(8, 8, 8, 8)
+        values_layout.setSpacing(4)
+
+        values_help = QLabel(
+            "📋 Values are the specific items found within each slot. "
+            "For example, 'Rifle', 'Pistol', 'Shotgun' are values of a 'Weapon' slot.\n\n"
+            "• Review values grouped by their slot\n"
+            "• Values are extracted from unique tokens in your filenames\n"
+            "• High confidence values appear in more files"
+        )
+        values_help.setStyleSheet("color: #888; font-size: 11px; padding: 6px; background-color: #1a1a2e; border-radius: 4px;")
+        values_help.setWordWrap(True)
+        values_layout.addWidget(values_help)
+
+        self.values_tree = QTreeWidget()
+        self.values_tree.setHeaderLabels(["Slot", "Value", "Confidence"])
+        self.values_tree.setColumnWidth(0, 180)
+        self.values_tree.setColumnWidth(1, 200)
+        self.values_tree.setStyleSheet("""
+            QTreeWidget {
+                background-color: #1a1a2e;
+                border: 1px solid #333;
+                border-radius: 4px;
+                font-size: 12px;
+            }
+            QTreeWidget::item { padding: 4px; color: #ddd; }
+            QTreeWidget::item:selected { background-color: #3a3a5e; }
+        """)
+        values_layout.addWidget(self.values_tree)
+        self.workspace_tabs.addTab(values_widget, "📋 Values")
+
+        # --- Categories Tab (preserved from old UI) ---
+        cat_widget = QWidget()
+        cat_layout = QVBoxLayout(cat_widget)
+        cat_layout.setContentsMargins(8, 8, 8, 8)
+        cat_layout.setSpacing(4)
+
+        cat_help = QLabel(
+            "📁 Optionally organize patterns into named groups.\n"
+            "Drag patterns from the Patterns tab into categories here."
+        )
+        cat_help.setStyleSheet("color: #888; font-size: 11px; padding: 6px; background-color: #1a1a2e; border-radius: 4px;")
+        cat_help.setWordWrap(True)
+        cat_layout.addWidget(cat_help)
+
         cat_header_row = QHBoxLayout()
-        cat_header = QLabel("Categories")
-        cat_header.setStyleSheet("font-size: 13px; font-weight: bold; color: #8ab4f8;")
-        cat_header_row.addWidget(cat_header)
         cat_header_row.addStretch()
         self.btn_new_category = QPushButton("+ New Category")
         self.btn_new_category.setStyleSheet("background-color: #1a5276; font-size: 11px; padding: 4px 10px;")
@@ -193,63 +398,18 @@ class TaxonomyIngestDialog(QDialog):
         self.cat_scroll.setWidget(self.cat_scroll_widget)
         self.cat_scroll.setStyleSheet("QScrollArea { background-color: transparent; border: none; }")
         cat_layout.addWidget(self.cat_scroll)
+        self.workspace_tabs.addTab(cat_widget, "📁 Categories")
 
-        workspace_splitter.addWidget(cat_frame)
+        center_layout.addWidget(self.workspace_tabs, stretch=1)
 
-        # Right: Detail panel
-        detail_frame = QFrame()
-        detail_layout = QVBoxLayout(detail_frame)
-        detail_layout.setContentsMargins(4, 4, 4, 4)
-        detail_header = QLabel("\u2461 Details")
-        detail_header.setStyleSheet("font-size: 13px; font-weight: bold; color: #bb86fc;")
-        detail_layout.addWidget(detail_header)
-
-        name_row = QHBoxLayout()
-        name_row.addWidget(QLabel("Pattern name:"))
-        self.ns_name_edit = QLineEdit()
-        self.ns_name_edit.setPlaceholderText("Select an item to see details")
-        self.ns_name_edit.editingFinished.connect(self._on_ns_name_edited)
-        name_row.addWidget(self.ns_name_edit)
-        detail_layout.addLayout(name_row)
-
-        self.structure_label = QLabel("Structure: \u2014")
-        self.structure_label.setStyleSheet("color: #aaa; font-family: monospace; padding: 4px;")
-        detail_layout.addWidget(self.structure_label)
-
-        wc_label = QLabel("Slots:")
-        wc_label.setStyleSheet("font-weight: bold; margin-top: 6px;")
-        detail_layout.addWidget(wc_label)
-        self.wc_tree = QTreeWidget()
-        self.wc_tree.setHeaderLabels(["Slot Name", "Values", "Confidence"])
-        self.wc_tree.setColumnWidth(0, 150)
-        self.wc_tree.setColumnWidth(1, 120)
-        self.wc_tree.itemDoubleClicked.connect(self._on_wc_rename)
-        detail_layout.addWidget(self.wc_tree)
-
-        ex_label = QLabel("Example filenames:")
-        ex_label.setStyleSheet("font-weight: bold; margin-top: 6px;")
-        detail_layout.addWidget(ex_label)
-        self.example_list = QListWidget()
-        self.example_list.setMaximumHeight(120)
-        self.example_list.setStyleSheet("""
-            QListWidget { background-color: #1a1a2e; border: 1px solid #333; border-radius: 3px; }
-            QListWidget::item { color: #aaa; padding: 2px 6px; font-family: monospace; font-size: 11px; }
-        """)
-        detail_layout.addWidget(self.example_list)
-
-        workspace_splitter.addWidget(detail_frame)
-        workspace_splitter.setSizes([350, 350, 400])
-
-        root.addWidget(workspace_splitter, stretch=1)
-
-        # ─── Phase 3: Staging Area ─────────────────────────────────
+        # ─── STAGING AREA (bottom of center) ──────────────────────────
         staging_frame = QFrame()
         staging_frame.setStyleSheet("QFrame { background-color: #1a1a2e; border-radius: 6px; }")
         staging_layout = QVBoxLayout(staging_frame)
         staging_layout.setContentsMargins(8, 6, 8, 6)
 
         staging_header_row = QHBoxLayout()
-        staging_header = QLabel("\u2462 Staging Area (reviewed patterns)")
+        staging_header = QLabel("③ Staging Area (reviewed patterns)")
         staging_header.setStyleSheet("font-size: 13px; font-weight: bold; color: #2d5a27;")
         staging_header_row.addWidget(staging_header)
         self.staged_count_label = QLabel("0 items staged")
@@ -257,15 +417,15 @@ class TaxonomyIngestDialog(QDialog):
         staging_header_row.addWidget(self.staged_count_label)
         staging_header_row.addStretch()
 
-        self.btn_unstage = QPushButton("\u25c2 Unstage Selected")
+        self.btn_unstage = QPushButton("◂ Unstage Selected")
         self.btn_unstage.clicked.connect(self._unstage_selected)
         staging_header_row.addWidget(self.btn_unstage)
 
-        self.btn_save_session = QPushButton("\U0001f4be Save Session")
+        self.btn_save_session = QPushButton("💾 Save Session")
         self.btn_save_session.clicked.connect(self._save_session)
         staging_header_row.addWidget(self.btn_save_session)
 
-        self.btn_commit = QPushButton("\u2705 Commit All to Project")
+        self.btn_commit = QPushButton("✅ Commit All to Project")
         self.btn_commit.setStyleSheet("background-color: #2d5a27; font-weight: bold; padding: 6px 20px;")
         self.btn_commit.setEnabled(False)
         self.btn_commit.clicked.connect(self._on_commit)
@@ -275,15 +435,26 @@ class TaxonomyIngestDialog(QDialog):
 
         self.staging_tree = QTreeWidget()
         self.staging_tree.setHeaderLabels(["Pattern Name", "Structure", "Slots", "Values"])
-        self.staging_tree.setMaximumHeight(160)
+        self.staging_tree.setMaximumHeight(140)
         self.staging_tree.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         staging_layout.addWidget(self.staging_tree)
 
-        root.addWidget(staging_frame)
+        center_layout.addWidget(staging_frame)
 
-        # ─── Status bar ───────────────────────────────────────────
+        main_splitter.addWidget(center_frame)
+
+        # ─── RIGHT SIDEBAR: Progress ─────────────────────────────────
+        self.progress_panel = ProgressPanel()
+        self.progress_panel.setMinimumWidth(200)
+        self.progress_panel.setMaximumWidth(260)
+        main_splitter.addWidget(self.progress_panel)
+
+        main_splitter.setSizes([280, 750, 220])
+        root.addWidget(main_splitter, stretch=1)
+
+        # ─── Status bar ───────────────────────────────────────────────
         status_row = QHBoxLayout()
-        self.status_label = QLabel("Ready. Drop files above to begin.")
+        self.status_label = QLabel("Ready. Drop files in the left panel to begin.")
         self.status_label.setStyleSheet("color: #888; font-size: 11px;")
         status_row.addWidget(self.status_label)
         status_row.addStretch()
@@ -296,38 +467,53 @@ class TaxonomyIngestDialog(QDialog):
         self._selected_ns_id = None
         self._ns_map = {}  # temp_id -> CandidateNameSet
 
-    # ─── File import handlers ─────────────────────────────────────
+    # ─── File import handlers ─────────────────────────────────────────
 
     def _on_files_dropped(self, paths):
-        extracted_names = []
+        extracted = {}  # source_label -> [names]
         for path in paths:
             if os.path.isdir(path):
+                label = os.path.basename(path) + "/"
+                names = []
                 for dirpath, dirnames, filenames in os.walk(path):
                     for f in filenames:
                         name, _ = os.path.splitext(f)
-                        extracted_names.append(name)
+                        names.append(name)
+                if names:
+                    extracted[label] = names
             elif os.path.isfile(path) and path.lower().endswith(('.csv', '.txt')):
+                label = os.path.basename(path)
+                names = []
                 with open(path, 'r', encoding='utf-8') as f:
                     for line in f:
                         for part in line.split(','):
                             cleaned = part.strip()
                             if cleaned:
-                                extracted_names.append(cleaned)
+                                names.append(cleaned)
+                if names:
+                    extracted[label] = names
 
-        if extracted_names:
+        if extracted:
+            all_names = []
+            for label, names in extracted.items():
+                all_names.extend(names)
             current_text = self.input_area.toPlainText().strip()
-            new_text = "\n".join(extracted_names)
+            new_text = "\n".join(all_names)
             if current_text:
                 self.input_area.setPlainText(current_text + "\n" + new_text)
             else:
                 self.input_area.setPlainText(new_text)
-            self.status_label.setText(f"{len(extracted_names)} names loaded. Click 'Analyze' to process.")
+            total = sum(len(v) for v in extracted.values())
+            sources = ", ".join(extracted.keys())
+            self.status_label.setText(f"{total} names loaded from {sources}. Click 'Analyze' to process.")
 
     def _on_analyze(self):
         text = self.input_area.toPlainText().strip()
         if not text:
             return
 
+        # Try to parse source labels from the input
+        # For pasted text, use "Pasted Text" as the source label
         names = []
         for line in text.split('\n'):
             for part in line.split(','):
@@ -373,15 +559,19 @@ class TaxonomyIngestDialog(QDialog):
         unknowns = total - dedup_count
         if dedup_count > 0:
             self.dedup_label.setText(
-                f"\u2713 {dedup_count} of {total} filenames already exist in the dictionary. "
-                f"{unknowns} new items to organize."
+                f"✓ {dedup_count} of {total} filenames already exist. "
+                f"{unknowns} new items."
             )
             self.dedup_frame.setVisible(True)
             self._populate_match_details()
         else:
             self.dedup_frame.setVisible(False)
 
-        # Unsorted list (non-staged, non-categorized items)
+        # Source tree
+        if self.session.source_groups:
+            self.source_tree.populate_from_session(self.session.source_groups)
+
+        # Unsorted list (Patterns tab — non-staged, non-categorized items)
         self.unsorted_list.clear()
         for ns in self.session.candidate_namesets:
             if not ns.staged and not ns.category:
@@ -398,8 +588,15 @@ class TaxonomyIngestDialog(QDialog):
                 if ns.category in self.category_buckets:
                     self.category_buckets[ns.category].add_item(ns.temp_id, self._ns_display_text(ns))
 
+        # Populate Slots and Values tabs
+        self._refresh_slots_tab()
+        self._refresh_values_tab()
+
         # Staging tree
         self._refresh_staging_tree()
+
+        # Progress panel
+        self._refresh_progress()
 
         ns_count = len([ns for ns in self.session.candidate_namesets if not ns.staged])
         self.status_label.setText(
@@ -431,7 +628,7 @@ class TaxonomyIngestDialog(QDialog):
         pattern = "".join(parts)
         return f"{ns.suggested_name}  ({len(ns.matched_assets)} files)  {pattern}"
 
-    # ─── Dedup details ─────────────────────────────────────────────
+    # ─── Dedup details ─────────────────────────────────────────────────
 
     def _populate_match_details(self):
         self.match_details_tree.clear()
@@ -453,9 +650,9 @@ class TaxonomyIngestDialog(QDialog):
     def _toggle_match_details(self):
         vis = not self.match_details_tree.isVisible()
         self.match_details_tree.setVisible(vis)
-        self.btn_show_matches.setText("Hide Matches \u25b4" if vis else "Show Matches \u25be")
+        self.btn_show_matches.setText("Hide Matches ▴" if vis else "Show Matches ▾")
 
-    # ─── Item selection / detail panel ─────────────────────────────
+    # ─── Item selection / detail panel ─────────────────────────────────
 
     def _on_item_selected(self, item):
         temp_id = item.data(Qt.ItemDataRole.UserRole)
@@ -498,6 +695,9 @@ class TaxonomyIngestDialog(QDialog):
         for asset in ns.matched_assets[:30]:
             self.example_list.addItem(asset.filename)
 
+        # Switch to Patterns tab to show details
+        self.workspace_tabs.setCurrentIndex(0)
+
     def _on_ns_name_edited(self):
         if self._selected_ns_id and self._selected_ns_id in self._ns_map:
             new_name = self.ns_name_edit.text().strip()
@@ -517,8 +717,103 @@ class TaxonomyIngestDialog(QDialog):
             if self._selected_ns_id:
                 self._show_details(self._selected_ns_id)
             self._refresh_unsorted_display()
+            self._refresh_slots_tab()
+            self._refresh_values_tab()
 
-    # ─── Category management ──────────────────────────────────────
+    # ─── Slots tab ─────────────────────────────────────────────────────
+
+    def _refresh_slots_tab(self):
+        """Populate the Slots tab with all discovered wildcard slots."""
+        self.slots_tree.clear()
+        if not self.session:
+            return
+
+        for wc_id, wc in self.session.candidate_wildcards.items():
+            # Find which patterns use this slot
+            used_in = []
+            for ns in self.session.candidate_namesets:
+                for part in ns.structure:
+                    if part.get("temp_id") == wc_id:
+                        used_in.append(ns.suggested_name)
+                        break
+
+            slot_item = QTreeWidgetItem(self.slots_tree, [
+                wc.suggested_name,
+                str(len(wc.values)),
+                f"{wc.confidence:.0f}%",
+                ", ".join(used_in) if used_in else "—"
+            ])
+            slot_item.setData(0, Qt.ItemDataRole.UserRole, wc_id)
+            slot_item.setForeground(0, QBrush(QColor("#8ab4f8")))
+
+            # Add values as children
+            for val in sorted(wc.values, key=lambda x: x.confidence, reverse=True):
+                val_item = QTreeWidgetItem(slot_item, [
+                    "", val.name, f"{val.confidence:.0f}%", ""
+                ])
+                val_item.setForeground(1, QBrush(QColor("#ccc")))
+
+    def _on_slot_rename(self, item, column):
+        """Double-click on a slot in the Slots tab to rename it."""
+        wc_id = item.data(0, Qt.ItemDataRole.UserRole)
+        if not wc_id or wc_id not in self.session.candidate_wildcards:
+            return
+        wc = self.session.candidate_wildcards[wc_id]
+        new_name, ok = QInputDialog.getText(self, "Rename Slot", f"New name for '{wc.suggested_name}':", text=wc.suggested_name)
+        if ok and new_name.strip():
+            wc.suggested_name = new_name.strip()
+            self._refresh_slots_tab()
+            self._refresh_values_tab()
+            self._refresh_unsorted_display()
+            if self._selected_ns_id:
+                self._show_details(self._selected_ns_id)
+
+    # ─── Values tab ────────────────────────────────────────────────────
+
+    def _refresh_values_tab(self):
+        """Populate the Values tab grouped by slot."""
+        self.values_tree.clear()
+        if not self.session:
+            return
+
+        for wc_id, wc in self.session.candidate_wildcards.items():
+            slot_item = QTreeWidgetItem(self.values_tree, [
+                f"🎰 {wc.suggested_name}", "", ""
+            ])
+            slot_item.setForeground(0, QBrush(QColor("#8ab4f8")))
+            slot_item.setExpanded(True)
+
+            for val in sorted(wc.values, key=lambda x: x.confidence, reverse=True):
+                val_item = QTreeWidgetItem(slot_item, [
+                    "", val.name, f"{val.confidence:.0f}%"
+                ])
+                val_item.setForeground(1, QBrush(QColor("#ddd")))
+
+    # ─── Progress panel ───────────────────────────────────────────────
+
+    def _refresh_progress(self):
+        """Update the progress sidebar with staged items."""
+        if not self.session:
+            self.progress_panel.update_progress([], 0)
+            return
+
+        staged_items = []
+        for ns in self._ns_map.values():
+            if ns.staged:
+                parts = []
+                for part in ns.structure:
+                    if part["type"] == "literal":
+                        parts.append(part["value"])
+                    else:
+                        wc = self.session.candidate_wildcards.get(part["temp_id"])
+                        name = wc.suggested_name if wc else "?"
+                        parts.append(f"[{name}]")
+                staged_items.append((ns.suggested_name, "".join(parts)))
+
+        total = len(self.session.candidate_namesets)
+        self.progress_panel.update_progress(staged_items, total)
+
+    # ─── Category management ──────────────────────────────────────────
 
     def _create_category(self):
         name, ok = QInputDialog.getText(self, "New Category", "Category name:")
@@ -603,8 +898,9 @@ class TaxonomyIngestDialog(QDialog):
                 ns.approved = True
                 bucket.remove_item(temp_id)
         self._refresh_staging_tree()
+        self._refresh_progress()
 
-    # ─── Staging ──────────────────────────────────────────────────
+    # ─── Staging ──────────────────────────────────────────────────────
 
     def _stage_selected_items(self):
         items = self.unsorted_list.selectedItems()
@@ -618,6 +914,7 @@ class TaxonomyIngestDialog(QDialog):
             row = self.unsorted_list.row(item)
             self.unsorted_list.takeItem(row)
         self._refresh_staging_tree()
+        self._refresh_progress()
 
     def _unstage_selected(self):
         items = self.staging_tree.selectedItems()
@@ -632,6 +929,7 @@ class TaxonomyIngestDialog(QDialog):
                 else:
                     self._add_to_unsorted(ns)
         self._refresh_staging_tree()
+        self._refresh_progress()
 
     def _refresh_staging_tree(self):
         self.staging_tree.clear()
@@ -663,7 +961,7 @@ class TaxonomyIngestDialog(QDialog):
         self.staged_count_label.setText(f"{n} item{'s' if n != 1 else ''} staged")
         self.btn_commit.setEnabled(n > 0)
 
-    # ─── Context menus ────────────────────────────────────────────
+    # ─── Context menus ────────────────────────────────────────────────
 
     def _unsorted_context_menu(self, pos: QPoint):
         items = self.unsorted_list.selectedItems()
@@ -676,7 +974,7 @@ class TaxonomyIngestDialog(QDialog):
         rename_act = menu.addAction("Rename") if len(items) == 1 else None
 
         if self.category_buckets:
-            cat_menu = menu.addMenu("Move to Category \u2192")
+            cat_menu = menu.addMenu("Move to Category →")
             for cat_name in self.category_buckets:
                 cat_menu.addAction(cat_name)
 
@@ -718,7 +1016,7 @@ class TaxonomyIngestDialog(QDialog):
             if ns:
                 item.setText(self._ns_display_text(ns))
 
-    # ─── Session persistence ──────────────────────────────────────
+    # ─── Session persistence ──────────────────────────────────────────
 
     def _save_session(self):
         if not self.session:
@@ -733,7 +1031,7 @@ class TaxonomyIngestDialog(QDialog):
         except Exception as e:
             QMessageBox.warning(self, "Save Failed", f"Could not save session:\n{e}")
 
-    # ─── Commit to project ────────────────────────────────────────
+    # ─── Commit to project ────────────────────────────────────────────
 
     def _on_commit(self):
         if not self.session:
@@ -818,6 +1116,6 @@ class TaxonomyIngestDialog(QDialog):
             ))
 
         self.tax_manager.save()
-        self.status_label.setText(f"\u2705 Committed {len(staged)} patterns to project dictionary.")
+        self.status_label.setText(f"✅ Committed {len(staged)} patterns to project dictionary.")
         QMessageBox.information(self, "Success", f"Successfully committed {len(staged)} patterns to the project dictionary.")
         self.accept()

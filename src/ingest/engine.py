@@ -180,6 +180,7 @@ class TaxonomyIngestEngine:
                     skipped=True,
                     matched_nameset_id=ns_id,
                     skip_reason=f"Matched '{ns_name}' ({ns_id})",
+                    source_label=source_name,
                 ))
             else:
                 tokens = self.split_into_tokens(name_no_ext)
@@ -188,6 +189,7 @@ class TaxonomyIngestEngine:
                     filename=name_no_ext,
                     tokens=tokens,
                     skipped=False,
+                    source_label=source_name,
                 ))
 
     def get_unknown_assets(self) -> List[ParsedAsset]:
@@ -330,11 +332,21 @@ class TaxonomyIngestEngine:
 
             candidate_namesets.append(ns)
 
+        # Build source_groups from all pending assets
+        source_groups = {}
+        for a in self.pending_assets:
+            label = a.source_label or "Unknown"
+            if label not in source_groups:
+                source_groups[label] = []
+            if a.filename not in source_groups[label]:
+                source_groups[label].append(a.filename)
+
         # Build session
         session = StagingSession(
             candidate_namesets=candidate_namesets,
             candidate_wildcards=candidate_wildcards,
             dedup_matches=self.get_dedup_matches(),
+            source_groups=source_groups,
             total_input_count=len(self.pending_assets),
         )
 
