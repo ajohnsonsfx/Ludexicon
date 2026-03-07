@@ -34,7 +34,7 @@ if not exist ".venv" (
 
 echo [Ludexicon] Launching application...
 :: Use start to launch pythonw so the command window can exit
-start "" pythonw src\ui_main.py
+start "" pythonw src\main.py
 
 endlocal
 exit

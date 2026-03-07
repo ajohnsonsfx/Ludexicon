@@ -1,269 +1,25 @@
+"""
+TaxonomyIngestDialog — full ingestion workspace dialog.
+
+Handles the complete workflow: file import → analysis → organize → stage → commit.
+"""
+import os
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QSplitter,
     QTreeWidget, QTreeWidgetItem, QPushButton, QFrame,
-    QScrollArea, QWidget, QCheckBox, QMenu, QInputDialog, QTextEdit,
-    QListWidget, QListWidgetItem, QAbstractItemView, QHeaderView,
-    QLineEdit, QGroupBox, QMessageBox, QFileDialog, QProgressBar,
-    QToolButton, QSizePolicy
+    QScrollArea, QWidget, QCheckBox, QMenu, QInputDialog,
+    QListWidget, QListWidgetItem, QAbstractItemView,
+    QLineEdit, QMessageBox, QFileDialog,
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QMimeData, QPoint
-from PyQt6.QtGui import QColor, QBrush, QAction, QDrag, QFont
-import os
-import tempfile
+from PyQt6.QtCore import Qt, pyqtSignal, QPoint
+from PyQt6.QtGui import QColor, QBrush
 
-from ingest_logic import (
-    TaxonomyIngestEngine, CandidateNameSet, CandidateWildcard,
-    StagingSession, DedupMatch
-)
-from logic import NameSet, Wildcard, Value, NameSetComponent
+from core.models import NameSet, Wildcard, Value, NameSetComponent
+from ingest.engine import TaxonomyIngestEngine
+from ingest.models import CandidateNameSet, StagingSession
+from ui.ingest.input_area import IngestInputArea
+from ui.ingest.category_bucket import DraggableNameSetList, CategoryBucket
 
-
-# ─── Drop Zone ───────────────────────────────────────────────────────
-
-class IngestInputArea(QTextEdit):
-    filesDropped = pyqtSignal(list)
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setAcceptDrops(True)
-        self.setPlaceholderText("Drag & drop folders or files here, or paste filenames (one per line)...")
-        self.setStyleSheet("""
-            QTextEdit {
-                background-color: #1e1e1e;
-                border: 2px dashed #555;
-                border-radius: 8px;
-                padding: 12px;
-                font-family: 'Consolas', 'Courier New', monospace;
-                font-size: 12px;
-                color: #ccc;
-            }
-            QTextEdit:hover {
-                border-color: #6a9fd8;
-            }
-        """)
-
-    def dragEnterEvent(self, event):
-        if event.mimeData().hasUrls() or event.mimeData().hasText():
-            event.accept()
-        else:
-            super().dragEnterEvent(event)
-
-    def dropEvent(self, event):
-        if event.mimeData().hasUrls():
-            urls = [url.toLocalFile() for url in event.mimeData().urls()]
-            self.filesDropped.emit(urls)
-        else:
-            super().dropEvent(event)
-
-
-# ─── Draggable NameSet List ──────────────────────────────────────────
-
-class DraggableNameSetList(QListWidget):
-    """List widget that supports dragging items out."""
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setDragEnabled(True)
-        self.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
-        self.setStyleSheet("""
-            QListWidget {
-                background-color: #1a1a2e;
-                border: 1px solid #333;
-                border-radius: 4px;
-                padding: 2px;
-            }
-            QListWidget::item {
-                padding: 6px 8px;
-                border-bottom: 1px solid #2a2a3e;
-                color: #ddd;
-            }
-            QListWidget::item:selected {
-                background-color: #3a3a5e;
-                color: #fff;
-            }
-            QListWidget::item:hover {
-                background-color: #2a2a4e;
-            }
-        """)
-
-    def startDrag(self, supportedActions):
-        items = self.selectedItems()
-        if not items:
-            return
-        drag = QDrag(self)
-        mime = QMimeData()
-        ids = [item.data(Qt.ItemDataRole.UserRole) for item in items if item.data(Qt.ItemDataRole.UserRole)]
-        mime.setText("\n".join(ids))
-        drag.setMimeData(mime)
-        drag.exec(Qt.DropAction.MoveAction)
-
-
-# ─── Category Bucket ─────────────────────────────────────────────────
-
-class CategoryBucket(QFrame):
-    """A collapsible category container that accepts drops."""
-    itemsDropped = pyqtSignal(str, list)  # category_name, list of temp_ids
-    itemSelected = pyqtSignal(str)  # temp_id
-    stageRequested = pyqtSignal(str)  # category_name
-    renameRequested = pyqtSignal(str)  # category_name
-    deleteRequested = pyqtSignal(str)  # category_name
-
-    def __init__(self, category_name: str, parent=None):
-        super().__init__(parent)
-        self.category_name = category_name
-        self.setAcceptDrops(True)
-        self.setFrameStyle(QFrame.Shape.StyledPanel)
-        self._items = {}  # temp_id -> display_text
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(4, 4, 4, 4)
-        layout.setSpacing(2)
-
-        # Header
-        header = QHBoxLayout()
-        self.title_label = QLabel(f"📁 {category_name}")
-        self.title_label.setStyleSheet("font-weight: bold; font-size: 13px; color: #8ab4f8;")
-        header.addWidget(self.title_label)
-        header.addStretch()
-        self.count_label = QLabel("0 items")
-        self.count_label.setStyleSheet("color: #888; font-size: 11px;")
-        header.addWidget(self.count_label)
-        self.toggle_btn = QToolButton()
-        self.toggle_btn.setText("▾")
-        self.toggle_btn.setStyleSheet("border: none; color: #888; font-size: 14px;")
-        self.toggle_btn.clicked.connect(self._toggle)
-        header.addWidget(self.toggle_btn)
-        layout.addLayout(header)
-
-        # Items list
-        self.item_list = QListWidget()
-        self.item_list.setMaximumHeight(200)
-        self.item_list.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
-        self.item_list.itemClicked.connect(lambda item: self.itemSelected.emit(item.data(Qt.ItemDataRole.UserRole)))
-        self.item_list.setStyleSheet("""
-            QListWidget {
-                background-color: #16213e;
-                border: 1px solid #2a2a4e;
-                border-radius: 3px;
-            }
-            QListWidget::item { padding: 4px 6px; color: #ccc; border-bottom: 1px solid #1a1a3e; }
-            QListWidget::item:selected { background-color: #3a3a5e; }
-        """)
-        layout.addWidget(self.item_list)
-
-        self.setStyleSheet("""
-            CategoryBucket {
-                background-color: #0f3460;
-                border: 1px solid #1a5276;
-                border-radius: 6px;
-            }
-            CategoryBucket:hover {
-                border-color: #6a9fd8;
-            }
-        """)
-        self._expanded = True
-
-        # Context menu
-        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.customContextMenuRequested.connect(self._show_context_menu)
-
-    def _toggle(self):
-        self._expanded = not self._expanded
-        self.item_list.setVisible(self._expanded)
-        self.toggle_btn.setText("▾" if self._expanded else "▸")
-
-    def _show_context_menu(self, pos):
-        menu = QMenu(self)
-        menu.setStyleSheet("QMenu { background-color: #1e1e2e; color: #ddd; } QMenu::item:selected { background-color: #3a3a5e; }")
-        rename_act = menu.addAction("Rename Category")
-        stage_act = menu.addAction("Stage All in Category")
-        menu.addSeparator()
-        delete_act = menu.addAction("Delete Category (move items back)")
-        action = menu.exec(self.mapToGlobal(pos))
-        if action == rename_act:
-            self.renameRequested.emit(self.category_name)
-        elif action == stage_act:
-            self.stageRequested.emit(self.category_name)
-        elif action == delete_act:
-            self.deleteRequested.emit(self.category_name)
-
-    def add_item(self, temp_id: str, display_text: str):
-        if temp_id in self._items:
-            return
-        self._items[temp_id] = display_text
-        item = QListWidgetItem(display_text)
-        item.setData(Qt.ItemDataRole.UserRole, temp_id)
-        self.item_list.addItem(item)
-        self._update_count()
-
-    def remove_item(self, temp_id: str):
-        if temp_id not in self._items:
-            return
-        del self._items[temp_id]
-        for i in range(self.item_list.count()):
-            w = self.item_list.item(i)
-            if w.data(Qt.ItemDataRole.UserRole) == temp_id:
-                self.item_list.takeItem(i)
-                break
-        self._update_count()
-
-    def get_all_ids(self) -> list:
-        return list(self._items.keys())
-
-    def _update_count(self):
-        n = len(self._items)
-        self.count_label.setText(f"{n} item{'s' if n != 1 else ''}")
-
-    def rename(self, new_name: str):
-        self.category_name = new_name
-        self.title_label.setText(f"📁 {new_name}")
-
-    def dragEnterEvent(self, event):
-        if event.mimeData().hasText():
-            event.acceptProposedAction()
-
-    def dragMoveEvent(self, event):
-        if event.mimeData().hasText():
-            event.acceptProposedAction()
-            self.setStyleSheet("""
-                CategoryBucket {
-                    background-color: #1a5276;
-                    border: 2px solid #6a9fd8;
-                    border-radius: 6px;
-                }
-            """)
-
-    def dragLeaveEvent(self, event):
-        self.setStyleSheet("""
-            CategoryBucket {
-                background-color: #0f3460;
-                border: 1px solid #1a5276;
-                border-radius: 6px;
-            }
-            CategoryBucket:hover {
-                border-color: #6a9fd8;
-            }
-        """)
-
-    def dropEvent(self, event):
-        self.setStyleSheet("""
-            CategoryBucket {
-                background-color: #0f3460;
-                border: 1px solid #1a5276;
-                border-radius: 6px;
-            }
-            CategoryBucket:hover {
-                border-color: #6a9fd8;
-            }
-        """)
-        if event.mimeData().hasText():
-            ids = event.mimeData().text().split("\n")
-            ids = [i for i in ids if i.strip()]
-            if ids:
-                self.itemsDropped.emit(self.category_name, ids)
-            event.acceptProposedAction()
-
-
-# ─── Main Dialog ─────────────────────────────────────────────────────
 
 class TaxonomyIngestDialog(QDialog):
     def __init__(self, tax_manager, parent=None):
@@ -332,7 +88,7 @@ class TaxonomyIngestDialog(QDialog):
         import_layout.setContentsMargins(8, 8, 8, 8)
         import_layout.setSpacing(4)
 
-        import_header = QLabel("① Import Files")
+        import_header = QLabel("\u2460 Import Files")
         import_header.setStyleSheet("font-size: 14px; font-weight: bold; color: #8ab4f8;")
         import_layout.addWidget(import_header)
 
@@ -352,12 +108,12 @@ class TaxonomyIngestDialog(QDialog):
             options_row.addWidget(chk)
         options_row.addStretch()
 
-        self.btn_analyze = QPushButton("⚡ Analyze")
+        self.btn_analyze = QPushButton("\u26a1 Analyze")
         self.btn_analyze.setStyleSheet("background-color: #1a5276; font-weight: bold; padding: 6px 20px;")
         self.btn_analyze.clicked.connect(self._on_analyze)
         options_row.addWidget(self.btn_analyze)
 
-        self.btn_load_session = QPushButton("📂 Load Session")
+        self.btn_load_session = QPushButton("\U0001f4c2 Load Session")
         self.btn_load_session.clicked.connect(self._on_load_session)
         options_row.addWidget(self.btn_load_session)
 
@@ -373,7 +129,7 @@ class TaxonomyIngestDialog(QDialog):
         self.dedup_label.setStyleSheet("color: #8bc34a; font-weight: bold;")
         dedup_layout.addWidget(self.dedup_label)
         dedup_layout.addStretch()
-        self.btn_show_matches = QPushButton("Show Matches ▾")
+        self.btn_show_matches = QPushButton("Show Matches \u25be")
         self.btn_show_matches.setStyleSheet("background-color: transparent; color: #8bc34a; border: none; text-decoration: underline;")
         self.btn_show_matches.clicked.connect(self._toggle_match_details)
         dedup_layout.addWidget(self.btn_show_matches)
@@ -403,9 +159,8 @@ class TaxonomyIngestDialog(QDialog):
         self.unsorted_list.customContextMenuRequested.connect(self._unsorted_context_menu)
         unsorted_layout.addWidget(self.unsorted_list)
 
-        # Button row under unsorted
         unsorted_btn_row = QHBoxLayout()
-        self.btn_stage_selected = QPushButton("Stage Selected ▸")
+        self.btn_stage_selected = QPushButton("Stage Selected \u25b8")
         self.btn_stage_selected.setStyleSheet("background-color: #2d5a27; font-weight: bold;")
         self.btn_stage_selected.clicked.connect(self._stage_selected_items)
         unsorted_btn_row.addWidget(self.btn_stage_selected)
@@ -445,11 +200,10 @@ class TaxonomyIngestDialog(QDialog):
         detail_frame = QFrame()
         detail_layout = QVBoxLayout(detail_frame)
         detail_layout.setContentsMargins(4, 4, 4, 4)
-        detail_header = QLabel("② Details")
+        detail_header = QLabel("\u2461 Details")
         detail_header.setStyleSheet("font-size: 13px; font-weight: bold; color: #bb86fc;")
         detail_layout.addWidget(detail_header)
 
-        # NameSet name editor
         name_row = QHBoxLayout()
         name_row.addWidget(QLabel("Pattern name:"))
         self.ns_name_edit = QLineEdit()
@@ -458,12 +212,10 @@ class TaxonomyIngestDialog(QDialog):
         name_row.addWidget(self.ns_name_edit)
         detail_layout.addLayout(name_row)
 
-        # Structure preview
         self.structure_label = QLabel("Structure: \u2014")
         self.structure_label.setStyleSheet("color: #aaa; font-family: monospace; padding: 4px;")
         detail_layout.addWidget(self.structure_label)
 
-        # Wildcard details tree
         wc_label = QLabel("Slots:")
         wc_label.setStyleSheet("font-weight: bold; margin-top: 6px;")
         detail_layout.addWidget(wc_label)
@@ -474,7 +226,6 @@ class TaxonomyIngestDialog(QDialog):
         self.wc_tree.itemDoubleClicked.connect(self._on_wc_rename)
         detail_layout.addWidget(self.wc_tree)
 
-        # Example filenames
         ex_label = QLabel("Example filenames:")
         ex_label.setStyleSheet("font-weight: bold; margin-top: 6px;")
         detail_layout.addWidget(ex_label)
@@ -498,7 +249,7 @@ class TaxonomyIngestDialog(QDialog):
         staging_layout.setContentsMargins(8, 6, 8, 6)
 
         staging_header_row = QHBoxLayout()
-        staging_header = QLabel("③ Staging Area (reviewed patterns)")
+        staging_header = QLabel("\u2462 Staging Area (reviewed patterns)")
         staging_header.setStyleSheet("font-size: 13px; font-weight: bold; color: #2d5a27;")
         staging_header_row.addWidget(staging_header)
         self.staged_count_label = QLabel("0 items staged")
@@ -506,15 +257,15 @@ class TaxonomyIngestDialog(QDialog):
         staging_header_row.addWidget(self.staged_count_label)
         staging_header_row.addStretch()
 
-        self.btn_unstage = QPushButton("◂ Unstage Selected")
+        self.btn_unstage = QPushButton("\u25c2 Unstage Selected")
         self.btn_unstage.clicked.connect(self._unstage_selected)
         staging_header_row.addWidget(self.btn_unstage)
 
-        self.btn_save_session = QPushButton("💾 Save Session")
+        self.btn_save_session = QPushButton("\U0001f4be Save Session")
         self.btn_save_session.clicked.connect(self._save_session)
         staging_header_row.addWidget(self.btn_save_session)
 
-        self.btn_commit = QPushButton("✅ Commit All to Project")
+        self.btn_commit = QPushButton("\u2705 Commit All to Project")
         self.btn_commit.setStyleSheet("background-color: #2d5a27; font-weight: bold; padding: 6px 20px;")
         self.btn_commit.setEnabled(False)
         self.btn_commit.clicked.connect(self._on_commit)
@@ -622,7 +373,7 @@ class TaxonomyIngestDialog(QDialog):
         unknowns = total - dedup_count
         if dedup_count > 0:
             self.dedup_label.setText(
-                f"✓ {dedup_count} of {total} filenames already exist in the dictionary. "
+                f"\u2713 {dedup_count} of {total} filenames already exist in the dictionary. "
                 f"{unknowns} new items to organize."
             )
             self.dedup_frame.setVisible(True)
@@ -656,6 +407,7 @@ class TaxonomyIngestDialog(QDialog):
         )
 
     def _add_to_unsorted(self, ns: CandidateNameSet):
+        from PyQt6.QtWidgets import QListWidgetItem
         text = self._ns_display_text(ns)
         item = QListWidgetItem(text)
         item.setData(Qt.ItemDataRole.UserRole, ns.temp_id)
@@ -685,7 +437,6 @@ class TaxonomyIngestDialog(QDialog):
         self.match_details_tree.clear()
         if not self.session:
             return
-        # Group by matched nameset
         groups = {}
         for m in self.session.dedup_matches:
             key = m.matched_nameset_name
@@ -696,13 +447,13 @@ class TaxonomyIngestDialog(QDialog):
         for ns_name, matches in sorted(groups.items()):
             parent = QTreeWidgetItem(self.match_details_tree, [f"{ns_name} ({len(matches)} matches)", ""])
             parent.setForeground(0, QBrush(QColor("#8bc34a")))
-            for m in matches[:50]:  # cap display
+            for m in matches[:50]:
                 QTreeWidgetItem(parent, [m.filename, m.matched_nameset_name])
 
     def _toggle_match_details(self):
         vis = not self.match_details_tree.isVisible()
         self.match_details_tree.setVisible(vis)
-        self.btn_show_matches.setText("Hide Matches ▴" if vis else "Show Matches ▾")
+        self.btn_show_matches.setText("Hide Matches \u25b4" if vis else "Show Matches \u25be")
 
     # ─── Item selection / detail panel ─────────────────────────────
 
@@ -718,7 +469,6 @@ class TaxonomyIngestDialog(QDialog):
 
         self.ns_name_edit.setText(ns.suggested_name)
 
-        # Structure preview
         parts = []
         for part in ns.structure:
             if part["type"] == "literal":
@@ -729,7 +479,6 @@ class TaxonomyIngestDialog(QDialog):
                 parts.append(f"[{name}]")
         self.structure_label.setText(f"Structure: {''.join(parts)}")
 
-        # Wildcard tree
         self.wc_tree.clear()
         for part in ns.structure:
             if part["type"] == "wildcard":
@@ -745,7 +494,6 @@ class TaxonomyIngestDialog(QDialog):
                     for val in sorted(wc.values, key=lambda x: x.confidence, reverse=True)[:30]:
                         QTreeWidgetItem(wc_item, [val.name, "", f"{val.confidence:.0f}%"])
 
-        # Example filenames
         self.example_list.clear()
         for asset in ns.matched_assets[:30]:
             self.example_list.addItem(asset.filename)
@@ -766,10 +514,8 @@ class TaxonomyIngestDialog(QDialog):
         if ok and new_name.strip():
             wc.suggested_name = new_name.strip()
             item.setText(0, new_name.strip())
-            # Refresh structure label
             if self._selected_ns_id:
                 self._show_details(self._selected_ns_id)
-            # Refresh unsorted list display
             self._refresh_unsorted_display()
 
     # ─── Category management ──────────────────────────────────────
@@ -805,11 +551,9 @@ class TaxonomyIngestDialog(QDialog):
             if not ns:
                 continue
 
-            # Remove from previous location
             if ns.category and ns.category in self.category_buckets:
                 self.category_buckets[ns.category].remove_item(temp_id)
             else:
-                # Remove from unsorted
                 for i in range(self.unsorted_list.count()):
                     w = self.unsorted_list.item(i)
                     if w and w.data(Qt.ItemDataRole.UserRole) == temp_id:
@@ -828,10 +572,8 @@ class TaxonomyIngestDialog(QDialog):
         if bucket:
             bucket.rename(new_name)
             self.category_buckets[new_name] = bucket
-            # Update session categories
             if self.session:
                 self.session.categories = [new_name if c == old_name else c for c in self.session.categories]
-            # Update all namesets pointing to old category
             for ns in self._ns_map.values():
                 if ns.category == old_name:
                     ns.category = new_name
@@ -840,7 +582,6 @@ class TaxonomyIngestDialog(QDialog):
         bucket = self.category_buckets.pop(name, None)
         if not bucket:
             return
-        # Move items back to unsorted
         for temp_id in bucket.get_all_ids():
             ns = self._ns_map.get(temp_id)
             if ns:
@@ -873,7 +614,6 @@ class TaxonomyIngestDialog(QDialog):
             if ns:
                 ns.staged = True
                 ns.approved = True
-        # Remove from unsorted
         for item in items:
             row = self.unsorted_list.row(item)
             self.unsorted_list.takeItem(row)
@@ -897,7 +637,6 @@ class TaxonomyIngestDialog(QDialog):
         self.staging_tree.clear()
         staged = [ns for ns in self._ns_map.values() if ns.staged]
         for ns in staged:
-            # Build structure text
             parts = []
             field_names = []
             val_count = 0
@@ -936,9 +675,8 @@ class TaxonomyIngestDialog(QDialog):
         stage_act = menu.addAction("Stage Selected")
         rename_act = menu.addAction("Rename") if len(items) == 1 else None
 
-        # Category sub-menu
         if self.category_buckets:
-            cat_menu = menu.addMenu("Move to Category →")
+            cat_menu = menu.addMenu("Move to Category \u2192")
             for cat_name in self.category_buckets:
                 cat_menu.addAction(cat_name)
 
@@ -967,7 +705,6 @@ class TaxonomyIngestDialog(QDialog):
                 row = self.unsorted_list.row(item)
                 self.unsorted_list.takeItem(row)
         elif action.parent() and isinstance(action.parent(), QMenu):
-            # It's a category action
             cat_name = action.text()
             temp_ids = [item.data(Qt.ItemDataRole.UserRole) for item in items]
             self._on_items_dropped_to_category(cat_name, temp_ids)
@@ -1018,8 +755,7 @@ class TaxonomyIngestDialog(QDialog):
         wc_mapping = {}  # temp_id -> real_id
 
         def find_existing_value(name):
-            for v in list(self.tax_manager.core_registry["values"].values()) + \
-                      list(self.tax_manager.project_registry["values"].values()):
+            for v in self.tax_manager.get_all_values():
                 if v.name.lower() == name.lower() or any(a.lower() == name.lower() for a in v.aliases):
                     return v
             return None
@@ -1032,11 +768,9 @@ class TaxonomyIngestDialog(QDialog):
                         continue
 
                     candidate_wc = self.session.candidate_wildcards[temp_id]
-                    # Use the suggested name (user-edited) for the real ID
                     safe_name = candidate_wc.suggested_name.replace(" ", "_").lower()
                     real_wc_id = f"wc.proj.{safe_name}"
 
-                    # Ensure uniqueness
                     counter = 2
                     base_id = real_wc_id
                     while self.tax_manager.get_wildcard(real_wc_id):
@@ -1054,7 +788,6 @@ class TaxonomyIngestDialog(QDialog):
                                 existing.aliases.append(cv.name)
                         else:
                             val_id = f"val.proj.{cv.name.lower()}"
-                            # Ensure value ID uniqueness
                             base_val_id = val_id
                             counter = 2
                             while self.tax_manager.get_value(val_id):
@@ -1074,7 +807,6 @@ class TaxonomyIngestDialog(QDialog):
 
             safe_ns_name = ns.suggested_name.replace(" ", "_").lower()
             ns_id = f"ns.proj.{safe_ns_name}"
-            # Ensure uniqueness
             base_ns_id = ns_id
             counter = 2
             while self.tax_manager.get_nameset(ns_id):
@@ -1086,6 +818,6 @@ class TaxonomyIngestDialog(QDialog):
             ))
 
         self.tax_manager.save()
-        self.status_label.setText(f"✅ Committed {len(staged)} patterns to project dictionary.")
+        self.status_label.setText(f"\u2705 Committed {len(staged)} patterns to project dictionary.")
         QMessageBox.information(self, "Success", f"Successfully committed {len(staged)} patterns to the project dictionary.")
         self.accept()

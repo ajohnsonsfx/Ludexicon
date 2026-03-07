@@ -1,247 +1,28 @@
+"""
+TaxonomyIngestEngine — the full ingestion pipeline.
+
+Handles:
+  - Phase 1: Parse and deduplicate filenames
+  - Phase 2: Run inference to find patterns and name wildcards
+  - Phase 3: Store results in a StagingSession for user review
+"""
 import os
 import re
 import json
-import uuid
-from dataclasses import dataclass, field
-from typing import List, Dict, Optional, Tuple, Set
-from pathlib import Path
+import itertools
+import logging
+from typing import List, Dict, Tuple, Set
 
+from ingest.models import (
+    ParsedAsset, CandidateValue, CandidateWildcard,
+    CandidateNameSet, DedupMatch, StagingSession,
+)
+from ingest.namer import WildcardNamer
 
-# ─── Data Classes ────────────────────────────────────────────────────
+logger = logging.getLogger("ludexicon.ingest.engine")
 
-@dataclass
-class ParsedAsset:
-    original_path: str
-    filename: str
-    tokens: List[str]
-    skipped: bool = False
-    matched_nameset_id: Optional[str] = None
-    skip_reason: Optional[str] = None
-    confidence: float = 0.0
-
-@dataclass
-class CandidateValue:
-    name: str
-    confidence: float
-
-@dataclass
-class CandidateWildcard:
-    temp_id: str
-    suggested_name: str
-    values: List[CandidateValue]
-    confidence: float
-
-@dataclass
-class CandidateNameSet:
-    temp_id: str
-    suggested_name: str
-    structure: List[Dict[str, str]]
-    matched_assets: List[ParsedAsset]
-    confidence: float
-    category: Optional[str] = None  # UI-only category assignment
-    staged: bool = False
-    approved: bool = False
-
-@dataclass
-class DedupMatch:
-    """Info about a filename that matched an existing NameSet."""
-    filename: str
-    matched_nameset_id: str
-    matched_nameset_name: str
-
-@dataclass
-class StagingSession:
-    """Intermediate representation that holds all work-in-progress before commit."""
-    session_id: str = ""
-    candidate_namesets: List[CandidateNameSet] = field(default_factory=list)
-    candidate_wildcards: Dict[str, CandidateWildcard] = field(default_factory=dict)
-    dedup_matches: List[DedupMatch] = field(default_factory=list)
-    categories: List[str] = field(default_factory=list)
-    total_input_count: int = 0
-
-    def __post_init__(self):
-        if not self.session_id:
-            self.session_id = str(uuid.uuid4())[:8]
-
-    def to_dict(self) -> dict:
-        return {
-            "session_id": self.session_id,
-            "categories": self.categories,
-            "total_input_count": self.total_input_count,
-            "candidate_namesets": [
-                {
-                    "temp_id": ns.temp_id,
-                    "suggested_name": ns.suggested_name,
-                    "structure": ns.structure,
-                    "matched_assets": [
-                        {"filename": a.filename, "original_path": a.original_path}
-                        for a in ns.matched_assets
-                    ],
-                    "confidence": ns.confidence,
-                    "category": ns.category,
-                    "staged": ns.staged,
-                    "approved": ns.approved,
-                }
-                for ns in self.candidate_namesets
-            ],
-            "candidate_wildcards": {
-                wc_id: {
-                    "temp_id": wc.temp_id,
-                    "suggested_name": wc.suggested_name,
-                    "values": [{"name": v.name, "confidence": v.confidence} for v in wc.values],
-                    "confidence": wc.confidence,
-                }
-                for wc_id, wc in self.candidate_wildcards.items()
-            },
-            "dedup_matches": [
-                {"filename": m.filename, "matched_nameset_id": m.matched_nameset_id, "matched_nameset_name": m.matched_nameset_name}
-                for m in self.dedup_matches
-            ],
-        }
-
-    @classmethod
-    def from_dict(cls, data: dict) -> "StagingSession":
-        session = cls(session_id=data.get("session_id", ""))
-        session.categories = data.get("categories", [])
-        session.total_input_count = data.get("total_input_count", 0)
-
-        # Rebuild candidate wildcards first (needed for reference)
-        for wc_id, wc_data in data.get("candidate_wildcards", {}).items():
-            session.candidate_wildcards[wc_id] = CandidateWildcard(
-                temp_id=wc_data["temp_id"],
-                suggested_name=wc_data["suggested_name"],
-                values=[CandidateValue(name=v["name"], confidence=v["confidence"]) for v in wc_data["values"]],
-                confidence=wc_data["confidence"],
-            )
-
-        # Rebuild candidate namesets
-        for ns_data in data.get("candidate_namesets", []):
-            assets = [
-                ParsedAsset(original_path=a.get("original_path", ""), filename=a["filename"], tokens=[])
-                for a in ns_data.get("matched_assets", [])
-            ]
-            session.candidate_namesets.append(CandidateNameSet(
-                temp_id=ns_data["temp_id"],
-                suggested_name=ns_data["suggested_name"],
-                structure=ns_data["structure"],
-                matched_assets=assets,
-                confidence=ns_data["confidence"],
-                category=ns_data.get("category"),
-                staged=ns_data.get("staged", False),
-                approved=ns_data.get("approved", False),
-            ))
-
-        session.dedup_matches = [
-            DedupMatch(filename=m["filename"], matched_nameset_id=m["matched_nameset_id"], matched_nameset_name=m["matched_nameset_name"])
-            for m in data.get("dedup_matches", [])
-        ]
-        return session
-
-
-# ─── Heuristic Wildcard Namer ────────────────────────────────────────
-
-class WildcardNamer:
-    """Uses a heuristic dictionary to suggest meaningful names for wildcard slots."""
-
-    def __init__(self, heuristics_path: str = None):
-        if heuristics_path is None:
-            heuristics_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "naming_heuristics.json")
-        self.heuristics_path = heuristics_path
-        self.categories: Dict[str, dict] = {}
-        self._load()
-
-    def _load(self):
-        if os.path.exists(self.heuristics_path):
-            with open(self.heuristics_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            self.categories = data.get("categories", {})
-            self.fallback_names = data.get("fallback_position_names", {})
-        else:
-            self.categories = {}
-            self.fallback_names = {}
-
-    def suggest_name(self, values: List[str], token_position: int, total_tokens: int, used_names: Set[str]) -> Tuple[str, float]:
-        """
-        Given a list of values at a wildcard slot, suggest a semantic name.
-        Returns (suggested_name, confidence_score).
-        """
-        if not values:
-            return self._fallback_name(token_position, total_tokens, used_names), 0.0
-
-        # Normalize values for comparison
-        normalized = {v.lower() for v in values}
-
-        best_name = None
-        best_score = 0.0
-
-        for cat_name, cat_data in self.categories.items():
-            examples_lower = {e.lower() for e in cat_data.get("examples", [])}
-            if not examples_lower:
-                continue
-
-            # Calculate overlap: how many of our values match examples in this category
-            overlap = normalized & examples_lower
-            if not overlap:
-                continue
-
-            # Score = fraction of our values that match this category
-            coverage = len(overlap) / len(normalized)
-            # Bonus for position bias matching
-            bias = cat_data.get("position_bias", "any")
-            position_bonus = 0.0
-            if bias == "early" and token_position <= total_tokens // 3:
-                position_bonus = 0.1
-            elif bias == "late" and token_position >= (total_tokens * 2) // 3:
-                position_bonus = 0.1
-            elif bias == "any":
-                position_bonus = 0.05
-
-            score = coverage + position_bonus
-
-            if score > best_score:
-                best_score = score
-                best_name = cat_name
-
-        # Require at least 15% coverage to use a category name
-        if best_name and best_score >= 0.15:
-            # Ensure uniqueness
-            final_name = best_name
-            counter = 2
-            while final_name in used_names:
-                final_name = f"{best_name}{counter}"
-                counter += 1
-            return final_name, min(best_score * 100, 100.0)
-
-        return self._fallback_name(token_position, total_tokens, used_names), 0.0
-
-    def _fallback_name(self, position: int, total: int, used_names: Set[str]) -> str:
-        """Generate a positional fallback name like 'Slot_1'."""
-        # Try positional fallback names first
-        pos_key = str(position) if position < total // 2 else str(position - total)
-        if pos_key in self.fallback_names:
-            name = self.fallback_names[pos_key]
-            if name not in used_names:
-                return name
-
-        # Generic numbered fallback
-        base = f"Slot_{position + 1}"
-        name = base
-        counter = 2
-        while name in used_names:
-            name = f"{base}_{counter}"
-            counter += 1
-        return name
-
-
-# ─── Ingest Engine ───────────────────────────────────────────────────
 
 class TaxonomyIngestEngine:
-    """
-    Handles the full ingestion pipeline:
-    - Phase 1: Parse and deduplicate filenames
-    - Phase 2: Run inference to find patterns and name wildcards
-    - Phase 3: Store results in a StagingSession for user review
-    """
     def __init__(self, taxonomy_manager):
         self.tax_mgr = taxonomy_manager
         self.pending_assets: List[ParsedAsset] = []
@@ -253,6 +34,8 @@ class TaxonomyIngestEngine:
 
         # Pre-compute known name cache for dedup
         self._known_names: Dict[str, Tuple[str, str]] = self._build_known_names_cache()
+
+    # ─── Name Cleaning ───────────────────────────────────────────────
 
     def clean_name(self, name: str) -> str:
         changed = True
@@ -282,6 +65,8 @@ class TaxonomyIngestEngine:
 
         return name
 
+    # ─── Known Names Cache ───────────────────────────────────────────
+
     def _build_known_names_cache(self) -> Dict[str, Tuple[str, str]]:
         """
         Generates every possible valid name from the dictionaries.
@@ -289,10 +74,8 @@ class TaxonomyIngestEngine:
         """
         known = {}
 
-        all_namesets = list(self.tax_mgr.core_registry["namesets"].values()) + \
-                       list(self.tax_mgr.project_registry["namesets"].values())
-        all_values = list(self.tax_mgr.core_registry["values"].values()) + \
-                     list(self.tax_mgr.project_registry["values"].values())
+        all_namesets = self.tax_mgr.get_all_namesets()
+        all_values = self.tax_mgr.get_all_values()
 
         # Group values by wildcard_id
         val_map = {}
@@ -307,13 +90,11 @@ class TaxonomyIngestEngine:
                 for name in names:
                     known[name] = (ns.id, ns.name)
             except Exception as e:
-                print(f"Warning: Could not pre-cache NameSet {ns.id}: {e}")
+                logger.warning("Could not pre-cache NameSet %s: %s", ns.id, e)
 
         return known
 
     def _generate_all_possible_names_with_aliases(self, nameset, val_map) -> List[str]:
-        import itertools
-
         def resolve_wc(wc_id: str) -> List[str]:
             results = []
             for val in val_map.get(wc_id, []):
@@ -346,6 +127,8 @@ class TaxonomyIngestEngine:
         combinations = list(itertools.product(*component_results))
         return ["".join(combo) for combo in combinations]
 
+    # ─── Tokenization ────────────────────────────────────────────────
+
     def split_into_tokens(self, filename: str) -> List[str]:
         """
         Splits a string by underscores, hyphens, and camelCase transitions.
@@ -367,6 +150,8 @@ class TaxonomyIngestEngine:
                     final_tokens.append(part)
 
         return final_tokens
+
+    # ─── Processing ──────────────────────────────────────────────────
 
     def process_raw_names(self, source_name: str, names: List[str]):
         """Processes raw names, deduplicating known ones and tokenizing unknowns."""
@@ -422,6 +207,8 @@ class TaxonomyIngestEngine:
                         matched_nameset_name=ns_name,
                     ))
         return matches
+
+    # ─── Inference ───────────────────────────────────────────────────
 
     def run_inference(self) -> StagingSession:
         """
@@ -552,6 +339,8 @@ class TaxonomyIngestEngine:
         )
 
         return session
+
+    # ─── Session Persistence ─────────────────────────────────────────
 
     def save_session(self, session: StagingSession, path: str):
         """Save staging session to a JSON file for later resumption."""
