@@ -207,6 +207,7 @@ class TaxonomyIngestEngine:
                         filename=a.filename,
                         matched_nameset_id=ns_id,
                         matched_nameset_name=ns_name,
+                        source_label=a.source_label or "Unknown"
                     ))
         return matches
 
@@ -335,6 +336,8 @@ class TaxonomyIngestEngine:
         # Build source_groups from all pending assets
         source_groups = {}
         for a in self.pending_assets:
+            if a.skipped:
+                continue # Skip dedup matches from source_groups
             label = a.source_label or "Unknown"
             if label not in source_groups:
                 source_groups[label] = []

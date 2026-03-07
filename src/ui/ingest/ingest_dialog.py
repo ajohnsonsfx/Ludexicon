@@ -24,7 +24,6 @@ from ingest.models import CandidateNameSet, StagingSession
 from ui.ingest.input_area import IngestInputArea
 from ui.ingest.category_bucket import DraggableNameSetList, CategoryBucket
 from ui.ingest.source_tree import ImportSourceTree
-from ui.ingest.progress_panel import ProgressPanel
 
 
 class TaxonomyIngestDialog(QDialog):
@@ -38,6 +37,8 @@ class TaxonomyIngestDialog(QDialog):
 
         self.session: StagingSession = None
         self.category_buckets: dict = {}  # name -> CategoryBucket
+
+        self.setAcceptDrops(True)
 
         self._init_ui()
 
@@ -130,7 +131,7 @@ class TaxonomyIngestDialog(QDialog):
         left_layout.addWidget(import_header)
 
         import_help = QLabel(
-            "Drop folders, CSV files, or paste filenames below.\n"
+            "Drop folders, CSV files, or paste filenames anywhere in this window.\n"
             "The tool will extract and analyze asset names."
         )
         import_help.setStyleSheet("color: #777; font-size: 10px; padding: 2px;")
@@ -194,8 +195,16 @@ class TaxonomyIngestDialog(QDialog):
         left_layout.addWidget(self.dedup_frame)
 
         # Source tree
-        self.source_tree = ImportSourceTree()
-        left_layout.addWidget(self.source_tree, stretch=1)
+        tree_splitter = QSplitter(Qt.Orientation.Vertical)
+        
+        self.source_tree = ImportSourceTree(title="📂 Imported")
+        tree_splitter.addWidget(self.source_tree)
+        
+        self.ingested_tree = ImportSourceTree(title="✅ Ingested")
+        tree_splitter.addWidget(self.ingested_tree)
+        
+        tree_splitter.setSizes([300, 300])
+        left_layout.addWidget(tree_splitter, stretch=1)
 
         main_splitter.addWidget(left_sidebar)
 
@@ -368,7 +377,7 @@ class TaxonomyIngestDialog(QDialog):
             QTreeWidget::item:selected { background-color: #3a3a5e; }
         """)
         slots_layout.addWidget(self.slots_tree)
-        self.workspace_tabs.addTab(slots_widget, "🎰 Slots & Values")
+        self.workspace_tabs.addTab(slots_widget, "🎰 Slots")
 
         center_layout.addWidget(self.workspace_tabs, stretch=1)
 
@@ -413,13 +422,7 @@ class TaxonomyIngestDialog(QDialog):
 
         main_splitter.addWidget(center_frame)
 
-        # ─── RIGHT SIDEBAR: Progress ─────────────────────────────────
-        self.progress_panel = ProgressPanel()
-        self.progress_panel.setMinimumWidth(200)
-        self.progress_panel.setMaximumWidth(260)
-        main_splitter.addWidget(self.progress_panel)
-
-        main_splitter.setSizes([280, 750, 220])
+        main_splitter.setSizes([350, 1150])
         root.addWidget(main_splitter, stretch=1)
 
         # ─── Status bar ───────────────────────────────────────────────
@@ -438,6 +441,28 @@ class TaxonomyIngestDialog(QDialog):
         self._ns_map = {}  # temp_id -> CandidateNameSet
 
     # ─── File import handlers ─────────────────────────────────────────
+
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasUrls() or event.mimeData().hasText():
+            event.acceptProposedAction()
+
+    def dropEvent(self, event):
+        paths = []
+        if event.mimeData().hasUrls():
+            for url in event.mimeData().urls():
+                if url.isLocalFile():
+                    paths.append(url.toLocalFile())
+        if paths:
+            self._on_files_dropped(paths)
+        elif event.mimeData().hasText():
+            text = event.mimeData().text()
+            current_text = self.input_area.toPlainText().strip()
+            new_text = text.strip()
+            if current_text:
+                self.input_area.setPlainText(current_text + "\n" + new_text)
+            else:
+                self.input_area.setPlainText(new_text)
+        event.acceptProposedAction()
 
     def _on_files_dropped(self, paths):
         extracted = {}  # source_label -> [names]
@@ -541,10 +566,6 @@ class TaxonomyIngestDialog(QDialog):
             self._populate_match_details()
         else:
             self.dedup_frame.setVisible(False)
-
-        # Source tree
-        if self.session.source_groups:
-            self.source_tree.populate_from_session(self.session.source_groups)
 
         # Unsorted list (Patterns tab — non-staged, non-categorized items)
         self.unsorted_list.clear()
@@ -875,29 +896,56 @@ class TaxonomyIngestDialog(QDialog):
     # (Deleting the old _refresh_values_tab)
 
 
-    # ─── Progress panel ───────────────────────────────────────────────
+    # ─── Progress / Ingested panel ───────────────────────────────────────────────
 
-    def _refresh_progress(self):
-        """Update the progress sidebar with staged items."""
+    def _refresh_imported_tree(self):
+        """Update the Imported sidebar to exclude understood/staged items."""
         if not self.session:
-            self.progress_panel.update_progress([], 0)
+            self.source_tree.clear()
             return
 
-        staged_items = []
+        imported_groups = {}
+        
+        # Add files that are NOT staged
+        for ns in self._ns_map.values():
+            if not ns.staged:
+                for a in ns.matched_assets:
+                    label = getattr(a, 'source_label', "Unknown")
+                    if label not in imported_groups:
+                        imported_groups[label] = []
+                    if a.filename not in imported_groups[label]:
+                        imported_groups[label].append(a.filename)
+
+        self.source_tree.populate_from_session(imported_groups)
+
+    def _refresh_progress(self):
+        """Update the Ingested sidebar with understood/staged items."""
+        if not self.session:
+            self.ingested_tree.clear()
+            return
+
+        ingested_groups = {}
+        
+        # Add deduplicated files (already understood by dictionary)
+        for m in self.session.dedup_matches:
+            label = m.source_label or "Unknown"
+            if label not in ingested_groups:
+                ingested_groups[label] = []
+            if m.filename not in ingested_groups[label]:
+                ingested_groups[label].append(m.filename)
+
+        # Add files from currently staged namesets
         for ns in self._ns_map.values():
             if ns.staged:
-                parts = []
-                for part in ns.structure:
-                    if part["type"] == "literal":
-                        parts.append(part["value"])
-                    else:
-                        wc = self.session.candidate_wildcards.get(part["temp_id"])
-                        name = wc.suggested_name if wc else "?"
-                        parts.append(f"[{name}]")
-                staged_items.append((ns.suggested_name, "".join(parts)))
+                for a in ns.matched_assets:
+                    label = getattr(a, 'source_label', "Unknown")
+                    if label not in ingested_groups:
+                        ingested_groups[label] = []
+                    if a.filename not in ingested_groups[label]:
+                        ingested_groups[label].append(a.filename)
 
-        total = len(self.session.candidate_namesets)
-        self.progress_panel.update_progress(staged_items, total)
+        self.ingested_tree.populate_from_session(ingested_groups)
+        self._refresh_imported_tree()
 
     # ─── Category management ──────────────────────────────────────────
 

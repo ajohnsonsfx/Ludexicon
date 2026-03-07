@@ -14,13 +14,13 @@ class ImportSourceTree(QFrame):
     """Shows imported files grouped by source (CSV file, folder, paste).
     Each top-level node is a source, children are deduplicated filenames."""
 
-    def __init__(self, parent=None):
+    def __init__(self, title="📂 Imported", parent=None):
         super().__init__(parent)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(2)
 
-        header = QLabel("📂 Imported Sources")
+        header = QLabel(title)
         header.setStyleSheet("font-size: 12px; font-weight: bold; color: #8ab4f8; padding: 2px;")
         layout.addWidget(header)
 

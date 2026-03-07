@@ -50,6 +50,7 @@ class DedupMatch:
     filename: str
     matched_nameset_id: str
     matched_nameset_name: str
+    source_label: str = "Unknown"
 
 
 @dataclass
@@ -99,7 +100,12 @@ class StagingSession:
                 for wc_id, wc in self.candidate_wildcards.items()
             },
             "dedup_matches": [
-                {"filename": m.filename, "matched_nameset_id": m.matched_nameset_id, "matched_nameset_name": m.matched_nameset_name}
+                {
+                    "filename": m.filename,
+                    "matched_nameset_id": m.matched_nameset_id,
+                    "matched_nameset_name": m.matched_nameset_name,
+                    "source_label": m.source_label
+                }
                 for m in self.dedup_matches
             ],
         }
@@ -138,7 +144,12 @@ class StagingSession:
             ))
 
         session.dedup_matches = [
-            DedupMatch(filename=m["filename"], matched_nameset_id=m["matched_nameset_id"], matched_nameset_name=m["matched_nameset_name"])
+            DedupMatch(
+                filename=m["filename"],
+                matched_nameset_id=m["matched_nameset_id"],
+                matched_nameset_name=m["matched_nameset_name"],
+                source_label=m.get("source_label", "Unknown")
+            )
             for m in data.get("dedup_matches", [])
         ]
         return session
