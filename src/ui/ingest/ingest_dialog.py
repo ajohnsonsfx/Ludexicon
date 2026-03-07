@@ -13,10 +13,10 @@ from PyQt6.QtWidgets import (
     QTreeWidget, QTreeWidgetItem, QPushButton, QFrame,
     QScrollArea, QWidget, QCheckBox, QMenu, QInputDialog,
     QListWidget, QListWidgetItem, QAbstractItemView,
-    QLineEdit, QMessageBox, QFileDialog, QTabWidget,
+    QLineEdit, QMessageBox, QFileDialog, QTabWidget, QScrollArea,
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QPoint
-from PyQt6.QtGui import QColor, QBrush
+from PyQt6.QtCore import Qt, pyqtSignal, QPoint, QMimeData
+from PyQt6.QtGui import QColor, QBrush, QDrag, QAction
 
 from core.models import NameSet, Wildcard, Value, NameSetComponent
 from ingest.engine import TaxonomyIngestEngine
@@ -276,7 +276,7 @@ class TaxonomyIngestDialog(QDialog):
         self.wc_tree.setHeaderLabels(["Slot Name", "Values", "Confidence"])
         self.wc_tree.setColumnWidth(0, 150)
         self.wc_tree.setColumnWidth(1, 120)
-        self.wc_tree.itemDoubleClicked.connect(self._on_wc_rename)
+        self.wc_tree.itemDoubleClicked.connect(self._on_wc_tree_double_click)
         detail_layout.addWidget(self.wc_tree)
 
         ex_label = QLabel("Example filenames:")
@@ -293,98 +293,18 @@ class TaxonomyIngestDialog(QDialog):
         patterns_splitter.addWidget(detail_frame)
         patterns_splitter.setSizes([350, 400])
 
-        patterns_layout.addWidget(patterns_splitter)
-        self.workspace_tabs.addTab(patterns_widget, "🔍 Patterns")
-
-        # --- Slots Tab ---
-        slots_widget = QWidget()
-        slots_layout = QVBoxLayout(slots_widget)
-        slots_layout.setContentsMargins(8, 8, 8, 8)
-        slots_layout.setSpacing(4)
-
-        slots_help = QLabel(
-            "🎰 Slots are the variable parts of your naming patterns. "
-            "For example, in 'Rifle_Shoot', both 'Rifle' and 'Shoot' are slots "
-            "representing a Weapon and an Action.\n\n"
-            "• Double-click a slot name to rename it\n"
-            "• Review the values discovered for each slot\n"
-            "• Slots are shared across patterns that use the same variable"
-        )
-        slots_help.setStyleSheet("color: #888; font-size: 11px; padding: 6px; background-color: #1a1a2e; border-radius: 4px;")
-        slots_help.setWordWrap(True)
-        slots_layout.addWidget(slots_help)
-
-        self.slots_tree = QTreeWidget()
-        self.slots_tree.setHeaderLabels(["Slot Name", "# Values", "Confidence", "Used In"])
-        self.slots_tree.setColumnWidth(0, 180)
-        self.slots_tree.setColumnWidth(1, 80)
-        self.slots_tree.setColumnWidth(2, 80)
-        self.slots_tree.itemDoubleClicked.connect(self._on_slot_rename)
-        self.slots_tree.setStyleSheet("""
-            QTreeWidget {
-                background-color: #1a1a2e;
-                border: 1px solid #333;
-                border-radius: 4px;
-                font-size: 12px;
-            }
-            QTreeWidget::item { padding: 4px; color: #ddd; }
-            QTreeWidget::item:selected { background-color: #3a3a5e; }
-        """)
-        slots_layout.addWidget(self.slots_tree)
-        self.workspace_tabs.addTab(slots_widget, "🎰 Slots")
-
-        # --- Values Tab ---
-        values_widget = QWidget()
-        values_layout = QVBoxLayout(values_widget)
-        values_layout.setContentsMargins(8, 8, 8, 8)
-        values_layout.setSpacing(4)
-
-        values_help = QLabel(
-            "📋 Values are the specific items found within each slot. "
-            "For example, 'Rifle', 'Pistol', 'Shotgun' are values of a 'Weapon' slot.\n\n"
-            "• Review values grouped by their slot\n"
-            "• Values are extracted from unique tokens in your filenames\n"
-            "• High confidence values appear in more files"
-        )
-        values_help.setStyleSheet("color: #888; font-size: 11px; padding: 6px; background-color: #1a1a2e; border-radius: 4px;")
-        values_help.setWordWrap(True)
-        values_layout.addWidget(values_help)
-
-        self.values_tree = QTreeWidget()
-        self.values_tree.setHeaderLabels(["Slot", "Value", "Confidence"])
-        self.values_tree.setColumnWidth(0, 180)
-        self.values_tree.setColumnWidth(1, 200)
-        self.values_tree.setStyleSheet("""
-            QTreeWidget {
-                background-color: #1a1a2e;
-                border: 1px solid #333;
-                border-radius: 4px;
-                font-size: 12px;
-            }
-            QTreeWidget::item { padding: 4px; color: #ddd; }
-            QTreeWidget::item:selected { background-color: #3a3a5e; }
-        """)
-        values_layout.addWidget(self.values_tree)
-        self.workspace_tabs.addTab(values_widget, "📋 Values")
-
-        # --- Categories Tab (preserved from old UI) ---
-        cat_widget = QWidget()
-        cat_layout = QVBoxLayout(cat_widget)
-        cat_layout.setContentsMargins(8, 8, 8, 8)
-        cat_layout.setSpacing(4)
-
-        cat_help = QLabel(
-            "📁 Optionally organize patterns into named groups.\n"
-            "Drag patterns from the Patterns tab into categories here."
-        )
-        cat_help.setStyleSheet("color: #888; font-size: 11px; padding: 6px; background-color: #1a1a2e; border-radius: 4px;")
-        cat_help.setWordWrap(True)
-        cat_layout.addWidget(cat_help)
-
+        # --- Categories Section (Bottom of Left Column in Patterns Tab) ---
+        cat_frame = QFrame()
+        cat_layout = QVBoxLayout(cat_frame)
+        cat_layout.setContentsMargins(0, 10, 0, 0)
+        
         cat_header_row = QHBoxLayout()
+        cat_label = QLabel("📁 Categories")
+        cat_label.setStyleSheet("font-size: 12px; font-weight: bold; color: #8ab4f8;")
+        cat_header_row.addWidget(cat_label)
         cat_header_row.addStretch()
-        self.btn_new_category = QPushButton("+ New Category")
-        self.btn_new_category.setStyleSheet("background-color: #1a5276; font-size: 11px; padding: 4px 10px;")
+        self.btn_new_category = QPushButton("+ New")
+        self.btn_new_category.setStyleSheet("background-color: #1a5276; font-size: 10px; padding: 2px 8px;")
         self.btn_new_category.clicked.connect(self._create_category)
         cat_header_row.addWidget(self.btn_new_category)
         cat_layout.addLayout(cat_header_row)
@@ -398,7 +318,57 @@ class TaxonomyIngestDialog(QDialog):
         self.cat_scroll.setWidget(self.cat_scroll_widget)
         self.cat_scroll.setStyleSheet("QScrollArea { background-color: transparent; border: none; }")
         cat_layout.addWidget(self.cat_scroll)
-        self.workspace_tabs.addTab(cat_widget, "📁 Categories")
+        
+        unsorted_layout.addWidget(cat_frame, stretch=1)
+
+        patterns_layout.addWidget(patterns_splitter)
+        self.workspace_tabs.addTab(patterns_widget, "🔍 Patterns")
+
+        # --- Slots & Values Tab ---
+        slots_widget = QWidget()
+        slots_layout = QVBoxLayout(slots_widget)
+        slots_layout.setContentsMargins(8, 8, 8, 8)
+        slots_layout.setSpacing(4)
+
+        slots_help = QLabel(
+            "🎰 Slots & Values: Manage the variable parts of your naming structure.\n\n"
+            "• **Rename Slot**: Double-click a blue slot name\n"
+            "• **Rename Value**: Double-click a gray value\n"
+            "• **Move Values**: Drag selected values (Ctrl/Shift+Click) to a different slot\n"
+            "• **Reorganize**: Right-click for more options"
+        )
+        slots_help.setStyleSheet("color: #888; font-size: 11px; padding: 6px; background-color: #1a1a2e; border-radius: 4px;")
+        slots_help.setWordWrap(True)
+        slots_layout.addWidget(slots_help)
+
+        self.slots_tree = QTreeWidget()
+        self.slots_tree.setHeaderLabels(["Slot / Value", "Detail", "Confidence", "Used In"])
+        self.slots_tree.setColumnWidth(0, 220)
+        self.slots_tree.setColumnWidth(1, 100)
+        self.slots_tree.setColumnWidth(2, 80)
+        self.slots_tree.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        self.slots_tree.setDragEnabled(True)
+        self.slots_tree.setAcceptDrops(True)
+        self.slots_tree.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
+        self.slots_tree.itemDoubleClicked.connect(self._on_slots_tree_double_click)
+        self.slots_tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.slots_tree.customContextMenuRequested.connect(self._slots_context_menu)
+        
+        # Override drop event for custom move logic
+        self.slots_tree.dropEvent = self._on_slots_tree_drop
+        
+        self.slots_tree.setStyleSheet("""
+            QTreeWidget {
+                background-color: #1a1a2e;
+                border: 1px solid #333;
+                border-radius: 4px;
+                font-size: 12px;
+            }
+            QTreeWidget::item { padding: 4px; color: #ddd; }
+            QTreeWidget::item:selected { background-color: #3a3a5e; }
+        """)
+        slots_layout.addWidget(self.slots_tree)
+        self.workspace_tabs.addTab(slots_widget, "🎰 Slots & Values")
 
         center_layout.addWidget(self.workspace_tabs, stretch=1)
 
@@ -533,7 +503,12 @@ class TaxonomyIngestDialog(QDialog):
         self.engine.process_raw_names("Input", names)
 
         self.session = self.engine.run_inference()
-        self._populate_from_session()
+        try:
+            self._populate_from_session()
+        except Exception as e:
+            QMessageBox.critical(self, "Analysis Failed", f"A crash occurred during UI population:\n{e}\n\nPlease check the logs.")
+            import traceback
+            traceback.print_exc()
 
     def _on_load_session(self):
         path, _ = QFileDialog.getOpenFileName(self, "Load Session", "", "JSON Files (*.json)")
@@ -577,10 +552,16 @@ class TaxonomyIngestDialog(QDialog):
             if not ns.staged and not ns.category:
                 self._add_to_unsorted(ns)
 
-        # Rebuild categories
+        # Clear and rebuild categories
+        # First, remove all existing category bucket widgets
+        for bucket in self.category_buckets.values():
+            bucket.setParent(None)
+            bucket.deleteLater()
+        self.category_buckets.clear()
+
+        # Rebuild categories from session
         for cat_name in self.session.categories:
-            if cat_name not in self.category_buckets:
-                self._add_category_widget(cat_name)
+            self._add_category_widget(cat_name)
 
         # Put categorized items in their buckets
         for ns in self.session.candidate_namesets:
@@ -588,9 +569,8 @@ class TaxonomyIngestDialog(QDialog):
                 if ns.category in self.category_buckets:
                     self.category_buckets[ns.category].add_item(ns.temp_id, self._ns_display_text(ns))
 
-        # Populate Slots and Values tabs
+        # Populate Slots and Values tab
         self._refresh_slots_tab()
-        self._refresh_values_tab()
 
         # Staging tree
         self._refresh_staging_tree()
@@ -704,32 +684,16 @@ class TaxonomyIngestDialog(QDialog):
             if new_name:
                 self._ns_map[self._selected_ns_id].suggested_name = new_name
 
-    def _on_wc_rename(self, item, column):
-        """Double-click on a slot to rename it."""
-        wc_id = item.data(0, Qt.ItemDataRole.UserRole)
-        if not wc_id or wc_id not in self.session.candidate_wildcards:
-            return
-        wc = self.session.candidate_wildcards[wc_id]
-        new_name, ok = QInputDialog.getText(self, "Rename Slot", f"New name for '{wc.suggested_name}':", text=wc.suggested_name)
-        if ok and new_name.strip():
-            wc.suggested_name = new_name.strip()
-            item.setText(0, new_name.strip())
-            if self._selected_ns_id:
-                self._show_details(self._selected_ns_id)
-            self._refresh_unsorted_display()
-            self._refresh_slots_tab()
-            self._refresh_values_tab()
-
-    # ─── Slots tab ─────────────────────────────────────────────────────
+    # ─── Slots & Values tab ────────────────────────────────────────────
 
     def _refresh_slots_tab(self):
-        """Populate the Slots tab with all discovered wildcard slots."""
+        """Populate the Slots & Values combined tree."""
         self.slots_tree.clear()
         if not self.session:
             return
 
         for wc_id, wc in self.session.candidate_wildcards.items():
-            # Find which patterns use this slot
+            # Find patterns using this slot
             used_in = []
             for ns in self.session.candidate_namesets:
                 for part in ns.structure:
@@ -737,57 +701,179 @@ class TaxonomyIngestDialog(QDialog):
                         used_in.append(ns.suggested_name)
                         break
 
-            slot_item = QTreeWidgetItem(self.slots_tree, [
+            slot_node = QTreeWidgetItem(self.slots_tree, [
                 wc.suggested_name,
-                str(len(wc.values)),
+                f"{len(wc.values)} values",
                 f"{wc.confidence:.0f}%",
                 ", ".join(used_in) if used_in else "—"
             ])
-            slot_item.setData(0, Qt.ItemDataRole.UserRole, wc_id)
-            slot_item.setForeground(0, QBrush(QColor("#8ab4f8")))
+            slot_node.setData(0, Qt.ItemDataRole.UserRole, wc_id)
+            slot_node.setData(0, Qt.ItemDataRole.UserRole + 1, "slot")
+            slot_node.setForeground(0, QBrush(QColor("#8ab4f8")))
+            slot_node.setFlags(slot_node.flags() | Qt.ItemFlag.ItemIsDropEnabled)
+            slot_node.setExpanded(True)
 
-            # Add values as children
             for val in sorted(wc.values, key=lambda x: x.confidence, reverse=True):
-                val_item = QTreeWidgetItem(slot_item, [
-                    "", val.name, f"{val.confidence:.0f}%", ""
+                val_node = QTreeWidgetItem(slot_node, [
+                    val.name,
+                    "",
+                    f"{val.confidence:.0f}%",
+                    ""
                 ])
-                val_item.setForeground(1, QBrush(QColor("#ccc")))
+                val_node.setData(0, Qt.ItemDataRole.UserRole, val.name)  # value name is the ID
+                val_node.setData(0, Qt.ItemDataRole.UserRole + 1, "value")
+                val_node.setData(0, Qt.ItemDataRole.UserRole + 2, wc_id) # parent slot ID
+                val_node.setForeground(0, QBrush(QColor("#ccc")))
+                val_node.setFlags(val_node.flags() & ~Qt.ItemFlag.ItemIsDropEnabled | Qt.ItemFlag.ItemIsDragEnabled)
 
-    def _on_slot_rename(self, item, column):
-        """Double-click on a slot in the Slots tab to rename it."""
+    def _on_slots_tree_double_click(self, item, column):
+        """Handle renaming for both slots and values in the main Slots tab."""
+        etype = item.data(0, Qt.ItemDataRole.UserRole + 1)
+        if etype == "slot":
+            self._handle_slot_rename(item)
+        elif etype == "value":
+            self._handle_value_rename(item)
+
+    def _on_wc_tree_double_click(self, item, column):
+        """Handle renaming for slots in the Pattern Details panel."""
+        # Only slots are top-level here, children are just values for display
+        if item.parent(): # It's a value
+            self._handle_value_rename_display_only(item)
+        else: # It's a slot
+            self._handle_slot_rename(item)
+
+    def _handle_value_rename_display_only(self, item):
+        """Renaming a value shown in the pattern details list."""
+        old_val_name = item.text(0)
+        parent = item.parent()
+        if not parent: return
+        wc_id = parent.data(0, Qt.ItemDataRole.UserRole)
+        wc = self.session.candidate_wildcards.get(wc_id)
+        if not wc: return
+
+        new_name, ok = QInputDialog.getText(self, "Rename Value", "New name:", text=old_val_name)
+        if ok and new_name.strip():
+            new_name = new_name.strip()
+            for val in wc.values:
+                if val.name == old_val_name:
+                    val.name = new_name
+                    break
+            self._refresh_slots_tab()
+            if self._selected_ns_id:
+                self._show_details(self._selected_ns_id)
+
+    def _handle_slot_rename(self, item):
         wc_id = item.data(0, Qt.ItemDataRole.UserRole)
-        if not wc_id or wc_id not in self.session.candidate_wildcards:
-            return
-        wc = self.session.candidate_wildcards[wc_id]
-        new_name, ok = QInputDialog.getText(self, "Rename Slot", f"New name for '{wc.suggested_name}':", text=wc.suggested_name)
+        wc = self.session.candidate_wildcards.get(wc_id)
+        if not wc: return
+        
+        new_name, ok = QInputDialog.getText(self, "Rename Slot", "New name:", text=wc.suggested_name)
         if ok and new_name.strip():
             wc.suggested_name = new_name.strip()
             self._refresh_slots_tab()
-            self._refresh_values_tab()
             self._refresh_unsorted_display()
             if self._selected_ns_id:
                 self._show_details(self._selected_ns_id)
 
-    # ─── Values tab ────────────────────────────────────────────────────
+    def _handle_value_rename(self, item):
+        old_val_name = item.data(0, Qt.ItemDataRole.UserRole)
+        wc_id = item.data(0, Qt.ItemDataRole.UserRole + 2)
+        wc = self.session.candidate_wildcards.get(wc_id)
+        if not wc: return
+        
+        new_name, ok = QInputDialog.getText(self, "Rename Value", "New name:", text=old_val_name)
+        if ok and new_name.strip():
+            new_name = new_name.strip()
+            # Update value name in the model
+            for val in wc.values:
+                if val.name == old_val_name:
+                    val.name = new_name
+                    break
+            self._refresh_slots_tab()
 
-    def _refresh_values_tab(self):
-        """Populate the Values tab grouped by slot."""
-        self.values_tree.clear()
-        if not self.session:
+    def _slots_context_menu(self, pos: QPoint):
+        items = self.slots_tree.selectedItems()
+        if not items: return
+        
+        menu = QMenu(self)
+        menu.setStyleSheet("QMenu { background-color: #1e1e2e; color: #ddd; } QMenu::item:selected { background-color: #3a3a5e; }")
+        
+        # Only show move if values are selected
+        values = [i for i in items if i.data(0, Qt.ItemDataRole.UserRole + 1) == "value"]
+        
+        if len(items) == 1:
+            menu.addAction("Rename", lambda: self._on_slots_tree_double_click(items[0], 0))
+        
+        if values:
+            move_menu = menu.addMenu("Move to Slot →")
+            for wc_id, wc in sorted(self.session.candidate_wildcards.items(), key=lambda x: x[1].suggested_name):
+                act = move_menu.addAction(wc.suggested_name)
+                act.setData(wc_id)
+                act.triggered.connect(lambda checked, target_id=wc_id: self._move_values_to_slot(values, target_id))
+
+        menu.exec(self.slots_tree.mapToGlobal(pos))
+
+    def _move_values_to_slot(self, items, target_wc_id):
+        """Logic to move values from one wildcard to another in the session model."""
+        target_wc = self.session.candidate_wildcards.get(target_wc_id)
+        if not target_wc: return
+        
+        for item in items:
+            source_wc_id = item.data(0, Qt.ItemDataRole.UserRole + 2)
+            val_name = item.data(0, Qt.ItemDataRole.UserRole)
+            
+            if source_wc_id == target_wc_id: continue
+            
+            source_wc = self.session.candidate_wildcards.get(source_wc_id)
+            if not source_wc: continue
+            
+            # Find and move the candidate value object
+            found_val = None
+            for val in source_wc.values:
+                if val.name == val_name:
+                    found_val = val
+                    break
+            
+            if found_val:
+                source_wc.values.remove(found_val)
+                # Check if exists in target, if so merge confidence? (Simple move for now)
+                target_wc.values.append(found_val)
+        
+        self._refresh_slots_tab()
+
+    def _on_slots_tree_drop(self, event):
+        """Custom drop handler for moving values between slots."""
+        target_item = self.slots_tree.itemAt(event.position().toPoint())
+        if not target_item:
+            event.ignore()
+            return
+        
+        # Determine target slot
+        target_wc_id = None
+        if target_item.data(0, Qt.ItemDataRole.UserRole + 1) == "slot":
+            target_wc_id = target_item.data(0, Qt.ItemDataRole.UserRole)
+        elif target_item.data(0, Qt.ItemDataRole.UserRole + 1) == "value":
+            target_wc_id = target_item.data(0, Qt.ItemDataRole.UserRole + 2)
+        
+        if not target_wc_id:
+            event.ignore()
             return
 
-        for wc_id, wc in self.session.candidate_wildcards.items():
-            slot_item = QTreeWidgetItem(self.values_tree, [
-                f"🎰 {wc.suggested_name}", "", ""
-            ])
-            slot_item.setForeground(0, QBrush(QColor("#8ab4f8")))
-            slot_item.setExpanded(True)
+        selected_items = self.slots_tree.selectedItems()
+        values_to_move = [i for i in selected_items if i.data(0, Qt.ItemDataRole.UserRole + 1) == "value"]
+        
+        if values_to_move:
+            self._move_values_to_slot(values_to_move, target_wc_id)
+            event.accept()
+        else:
+            event.ignore()
 
-            for val in sorted(wc.values, key=lambda x: x.confidence, reverse=True):
-                val_item = QTreeWidgetItem(slot_item, [
-                    "", val.name, f"{val.confidence:.0f}%"
-                ])
-                val_item.setForeground(1, QBrush(QColor("#ddd")))
+    def _on_slot_rename(self, item, column):
+        # Redundant now, replaced by _on_slots_tree_double_click
+        pass
+
+    # (Deleting the old _refresh_values_tab)
+
 
     # ─── Progress panel ───────────────────────────────────────────────
 
