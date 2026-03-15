@@ -16,7 +16,7 @@ from PyQt6.QtWidgets import (
     QLineEdit, QMessageBox, QFileDialog, QTabWidget, QScrollArea,
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QPoint, QMimeData
-from PyQt6.QtGui import QColor, QBrush, QDrag, QAction
+from PyQt6.QtGui import QColor, QBrush, QDrag, QAction, QTextCursor
 
 from core.models import NameSet, Wildcard, Value, NameSetComponent
 from ingest.engine import TaxonomyIngestEngine
@@ -455,13 +455,13 @@ class TaxonomyIngestDialog(QDialog):
         if paths:
             self._on_files_dropped(paths)
         elif event.mimeData().hasText():
-            text = event.mimeData().text()
-            current_text = self.input_area.toPlainText().strip()
-            new_text = text.strip()
-            if current_text:
-                self.input_area.setPlainText(current_text + "\n" + new_text)
+            cursor = self.input_area.textCursor()
+            cursor.movePosition(QTextCursor.MoveOperation.End)
+            text = event.mimeData().text().strip()
+            if cursor.position() > 0:
+                cursor.insertText("\n" + text)
             else:
-                self.input_area.setPlainText(new_text)
+                cursor.insertText(text)
         event.acceptProposedAction()
 
     def _on_files_dropped(self, paths):
@@ -904,19 +904,14 @@ class TaxonomyIngestDialog(QDialog):
             self.source_tree.clear()
             return
 
-        imported_groups = {}
-        
-        # Add files that are NOT staged
+        imported_groups: dict = {}
         for ns in self._ns_map.values():
             if not ns.staged:
                 for a in ns.matched_assets:
-                    label = getattr(a, 'source_label', "Unknown")
-                    if label not in imported_groups:
-                        imported_groups[label] = []
-                    if a.filename not in imported_groups[label]:
-                        imported_groups[label].append(a.filename)
+                    label = a.source_label or "Unknown"
+                    imported_groups.setdefault(label, set()).add(a.filename)
 
-        self.source_tree.populate_from_session(imported_groups)
+        self.source_tree.populate_from_session({k: list(v) for k, v in imported_groups.items()})
 
     def _refresh_progress(self):
         """Update the Ingested sidebar with understood/staged items."""
@@ -924,27 +919,21 @@ class TaxonomyIngestDialog(QDialog):
             self.ingested_tree.clear()
             return
 
-        ingested_groups = {}
-        
+        ingested_groups: dict = {}
+
         # Add deduplicated files (already understood by dictionary)
         for m in self.session.dedup_matches:
             label = m.source_label or "Unknown"
-            if label not in ingested_groups:
-                ingested_groups[label] = []
-            if m.filename not in ingested_groups[label]:
-                ingested_groups[label].append(m.filename)
+            ingested_groups.setdefault(label, set()).add(m.filename)
 
         # Add files from currently staged namesets
         for ns in self._ns_map.values():
             if ns.staged:
                 for a in ns.matched_assets:
-                    label = getattr(a, 'source_label', "Unknown")
-                    if label not in ingested_groups:
-                        ingested_groups[label] = []
-                    if a.filename not in ingested_groups[label]:
-                        ingested_groups[label].append(a.filename)
+                    label = a.source_label or "Unknown"
+                    ingested_groups.setdefault(label, set()).add(a.filename)
 
-        self.ingested_tree.populate_from_session(ingested_groups)
+        self.ingested_tree.populate_from_session({k: list(v) for k, v in ingested_groups.items()})
         self._refresh_imported_tree()
 
     # ─── Category management ──────────────────────────────────────────

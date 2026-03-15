@@ -334,15 +334,13 @@ class TaxonomyIngestEngine:
             candidate_namesets.append(ns)
 
         # Build source_groups from all pending assets
-        source_groups = {}
+        _sg: dict = {}
         for a in self.pending_assets:
             if a.skipped:
-                continue # Skip dedup matches from source_groups
+                continue  # Skip dedup matches from source_groups
             label = a.source_label or "Unknown"
-            if label not in source_groups:
-                source_groups[label] = []
-            if a.filename not in source_groups[label]:
-                source_groups[label].append(a.filename)
+            _sg.setdefault(label, set()).add(a.filename)
+        source_groups = {k: list(v) for k, v in _sg.items()}
 
         # Build session
         session = StagingSession(
